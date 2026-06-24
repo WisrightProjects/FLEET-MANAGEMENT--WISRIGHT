@@ -8,12 +8,107 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import sqlite3
 import time
+import math
 import os
 
 app = Flask(__name__)
 CORS(app)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "telemetry.db")
+
+# ---------------------------------------------------------------------------
+# Known bus stops / depots — geofence targets
+# ---------------------------------------------------------------------------
+
+STOPS = [
+    {"name": "Chennai Central",   "lat": 13.0827, "lon": 80.2707},
+    {"name": "Egmore",            "lat": 13.0784, "lon": 80.2617},
+    {"name": "Royapettah",        "lat": 13.0524, "lon": 80.2623},
+    {"name": "T Nagar Bus Stand", "lat": 13.0418, "lon": 80.2341},
+    {"name": "Vadapalani",        "lat": 13.0524, "lon": 80.2121},
+    {"name": "Anna Nagar",        "lat": 13.0850, "lon": 80.2101},
+    {"name": "Guindy",            "lat": 13.0067, "lon": 80.2206},
+    {"name": "Adyar",             "lat": 13.0012, "lon": 80.2565},
+    {"name": "Koyambedu",         "lat": 13.0694, "lon": 80.1948},
+    {"name": "Perambur",          "lat": 13.1175, "lon": 80.2479},
+    {"name": "Avadi",             "lat": 13.1132, "lon": 80.1050},
+    {"name": "Porur Junction",    "lat": 13.0359, "lon": 80.1569},
+]
+
+GEOFENCE_RADIUS_M = 300   # metres — vehicle must be within this to count as "at stop"
+
+# In-memory state: tracks which stop (if any) each device is currently inside
+# { dev_id: {"stop_name": str, "arrived_at": float, "event_id": int} }
+_active_at: dict = {}
+
+
+# ---------------------------------------------------------------------------
+# Geofence helpers
+# ---------------------------------------------------------------------------
+
+def haversine_m(lat1, lon1, lat2, lon2) -> float:
+    """Return distance in metres between two GPS coordinates."""
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def run_geofence(dev_id: str, lat: float, lon: float, ts: float):
+    """
+    Called after every telemetry insert.
+    Detects entry into / exit from known stops and writes to stop_events.
+    """
+    # Find nearest stop and its distance
+    nearest, nearest_dist = None, float("inf")
+    for stop in STOPS:
+        d = haversine_m(lat, lon, stop["lat"], stop["lon"])
+        if d < nearest_dist:
+            nearest_dist, nearest = d, stop
+
+    in_zone  = nearest_dist <= GEOFENCE_RADIUS_M
+    was      = _active_at.get(dev_id)          # previous state for this device
+
+    if in_zone:
+        if was is None:
+            # Fresh arrival at a stop
+            with get_db() as conn:
+                cur = conn.execute(
+                    "INSERT INTO stop_events (dev_id, location_name, lat, lon, arrived_at, duration_sec) VALUES (?,?,?,?,?,?)",
+                    (dev_id, nearest["name"], nearest["lat"], nearest["lon"], ts, None),
+                )
+                event_id = cur.lastrowid
+                conn.commit()
+            _active_at[dev_id] = {"stop_name": nearest["name"], "arrived_at": ts, "event_id": event_id}
+
+        elif was["stop_name"] != nearest["name"]:
+            # Moved directly from one stop zone into another — close old, open new
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE stop_events SET duration_sec=? WHERE id=?",
+                    (round(ts - was["arrived_at"], 1), was["event_id"]),
+                )
+                cur = conn.execute(
+                    "INSERT INTO stop_events (dev_id, location_name, lat, lon, arrived_at, duration_sec) VALUES (?,?,?,?,?,?)",
+                    (dev_id, nearest["name"], nearest["lat"], nearest["lon"], ts, None),
+                )
+                event_id = cur.lastrowid
+                conn.commit()
+            _active_at[dev_id] = {"stop_name": nearest["name"], "arrived_at": ts, "event_id": event_id}
+        # else: still inside same zone — nothing to do
+
+    else:
+        if was is not None:
+            # Vehicle left the stop — stamp the departure duration
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE stop_events SET duration_sec=? WHERE id=?",
+                    (round(ts - was["arrived_at"], 1), was["event_id"]),
+                )
+                conn.commit()
+            del _active_at[dev_id]
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +235,8 @@ def post_telemetry():
         )
         conn.commit()
 
+    run_geofence(data["dev_id"], data["lat"], data["lon"], ts)
+
     return jsonify({"status": "ok", "timestamp": ts}), 201
 
 
@@ -191,6 +288,12 @@ def get_devices():
 # ---------------------------------------------------------------------------
 # Stop events endpoints
 # ---------------------------------------------------------------------------
+
+@app.route("/telemetry/stops/config", methods=["GET"])
+def get_stops_config():
+    """Return the full list of defined geofence stops (for map markers)."""
+    return jsonify({"status": "ok", "data": STOPS, "radius_m": GEOFENCE_RADIUS_M}), 200
+
 
 @app.route("/telemetry/stops", methods=["GET"])
 def get_stops():
