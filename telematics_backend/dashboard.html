@@ -36,7 +36,7 @@
   <div class="hero">
     <div class="hero-tag">Live GPS · Updated every second</div>
     <h1>Know where your<br><span>bus is</span> right now</h1>
-    <p>Six routes across Chennai. On-board ESP32 trackers send GPS coordinates every 1.1 s — see your bus before you leave home.</p>
+    <p>Live GPS tracking across Chennai. On-board ESP32 trackers send real coordinates every 2 s — see your bus before you leave home.</p>
     <div class="hero-search">
       <input type="text" id="srchIn" placeholder="🔍  Enter stop or route name…" oninput="if(this.value.length>=4)doSearch()"/>
       <button onclick="doSearch()">Search</button>
@@ -44,7 +44,7 @@
   </div>
 
   <div class="stats-strip">
-    <div class="stat-item"><div class="stat-num" id="sBusTotal">6</div><div class="stat-lbl">Buses Active</div></div>
+    <div class="stat-item"><div class="stat-num" id="sBusTotal">—</div><div class="stat-lbl">Buses Active</div></div>
     <div class="stat-item"><div class="stat-num" id="sMoving">—</div><div class="stat-lbl">Moving</div></div>
     <div class="stat-item"><div class="stat-num" id="sStopped">—</div><div class="stat-lbl">Stopped</div></div>
     <div class="stat-item"><div class="stat-num" id="sSos" style="color:#B91C1C">—</div><div class="stat-lbl">SOS Alert</div></div>

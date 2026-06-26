@@ -19,15 +19,8 @@ const BMETA = {
   'VTUESP32-0096':{num:'Bus 96',route:'Adyar → Guindy → Porur → Avadi',color:'#ec4899',trip:'3pm'},
 };
 
-/* ── Live state cache — filled only by syncFromAPI ── */
+/* ── Live state cache — entries created ONLY when real data arrives from backend ── */
 const sim = {};
-Object.keys(BMETA).forEach(id => {
-  sim[id] = {
-    id, lat: null, lon: null, speed: 0, sos: 0,
-    geo: null, stop: false, stopSince: null,
-    ts: null, trail: [], lastUpdate: 0
-  };
-});
 
 let selFilter = 'all', curList = 'all', curBus = null, tickId = null;
 
@@ -185,6 +178,8 @@ function tick() {
     dateEl.textContent = `${days[n.getDay()]}, ${n.getDate()} ${months[n.getMonth()]} ${n.getFullYear()}`;
   }
   const all = Object.values(sim).filter(b => b.lastUpdate > 0);
+  const totalEl = document.getElementById('sBusTotal');
+  if (totalEl) totalEl.textContent = all.length;
   document.getElementById('sMoving').textContent  = all.filter(b => !b.stop && !b.sos).length;
   document.getElementById('sStopped').textContent = all.filter(b =>  b.stop && !b.sos).length;
   document.getElementById('sSos').textContent     = all.filter(b =>  b.sos).length;
@@ -252,23 +247,20 @@ function buildTrips(date) {
   const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const dn = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const sec = document.getElementById('tripsSection');
-  const wknd = date.getDay() === 0 || date.getDay() === 6;
   const label = `${dn[date.getDay()]}, ${date.getDate()} ${mn[date.getMonth()]} ${date.getFullYear()}`;
-  const amBuses = Object.keys(BMETA).filter(id => BMETA[id].trip === '8am');
-  const pmBuses = Object.keys(BMETA).filter(id => BMETA[id].trip === '3pm');
-  const sosId = Object.keys(BMETA).find(id => sim[id]?.sos);
 
-  if (wknd) {
-    sec.innerHTML = `<div class="trips-title">${label}</div>
-    <div class="weekend-box"><div class="wb-icon">🏖️</div><p>No bus service on weekends.</p></div>`;
-    return;
-  }
+  // Only include buses that have actually sent real data
+  const liveBuses = Object.keys(sim).filter(id => sim[id].lastUpdate > 0);
+  const amBuses   = liveBuses.filter(id => BMETA[id]?.trip === '8am');
+  const pmBuses   = liveBuses.filter(id => BMETA[id]?.trip === '3pm');
+  const otherBuses = liveBuses.filter(id => !BMETA[id]);
+  const sosId     = liveBuses.find(id => sim[id].sos);
 
   const sosBanner = sosId ? `<div class="sos-home-banner">
     <div class="sos-home-banner-icon">🚨</div>
     <div class="sos-home-banner-text">
-      <div class="sos-home-banner-title">${BMETA[sosId].num} — SOS alert active</div>
-      <div class="sos-home-banner-sub">${BMETA[sosId].route} · Dispatcher notified via SMS</div>
+      <div class="sos-home-banner-title">${BMETA[sosId]?.num || sosId} — SOS alert active</div>
+      <div class="sos-home-banner-sub">${BMETA[sosId]?.route || 'Live GPS Device'} · Dispatcher notified via SMS</div>
     </div>
     <button class="sos-home-banner-btn" onclick="openTracker('${sosId}')">View Live →</button>
   </div>` : '';
@@ -281,44 +273,66 @@ function buildTrips(date) {
     </div>
   </div>` : '';
 
+  if (!backendOnline || liveBuses.length === 0) {
+    sec.innerHTML = `${offlineBanner}
+      <div class="trips-title" style="margin-top:${!backendOnline?'16px':'0'}">${label} — Waiting for GPS Data</div>
+      <div class="weekend-box"><div class="wb-icon">📡</div><p>No bus data received yet. Start the backend and connect your ESP32 device.</p></div>`;
+    return;
+  }
+
+  const amSection = amBuses.length ? `
+    <div class="trip-card morning">
+      <div class="trip-card-bar"></div>
+      <div class="trip-card-body">
+        <div class="tc-top"><div class="tc-icon">🌅</div><span class="tc-badge badge-am">8:00 AM</span></div>
+        <div class="tc-title">Morning to College</div>
+        <div class="tc-time">${amBuses.length} bus${amBuses.length>1?'es':''} · Live GPS</div>
+        <div class="tc-meta">
+          <div class="tc-chip">🚌 <b>${amBuses.length}</b> Bus${amBuses.length>1?'es':''}</div>
+          <div class="tc-chip">📍 Live GPS</div>
+        </div>
+        <div class="tc-strips">${amBuses.map(stripHtml).join('')}</div>
+        <button class="tc-btn am-btn" onclick="showBusList('8am','Morning to College — 8:00 AM')">View All &amp; Track →</button>
+      </div>
+    </div>` : '';
+
+  const pmSection = pmBuses.length ? `
+    <div class="trip-card return">
+      <div class="trip-card-bar"></div>
+      <div class="trip-card-body">
+        <div class="tc-top"><div class="tc-icon">🌆</div><span class="tc-badge badge-pm">3:00 PM</span></div>
+        <div class="tc-title">Return from College</div>
+        <div class="tc-time">${pmBuses.length} bus${pmBuses.length>1?'es':''} · Live GPS</div>
+        <div class="tc-meta">
+          <div class="tc-chip">🚌 <b>${pmBuses.length}</b> Bus${pmBuses.length>1?'es':''}</div>
+          <div class="tc-chip">📍 Live GPS</div>
+        </div>
+        <div class="tc-strips">${pmBuses.map(stripHtml).join('')}</div>
+        <button class="tc-btn pm-btn" onclick="showBusList('3pm','Return from College — 3:00 PM')">View All &amp; Track →</button>
+      </div>
+    </div>` : '';
+
+  const otherSection = otherBuses.length ? `
+    <div class="trip-card morning" style="grid-column:1/-1">
+      <div class="trip-card-bar"></div>
+      <div class="trip-card-body">
+        <div class="tc-top"><div class="tc-icon">📡</div><span class="tc-badge badge-am">Live</span></div>
+        <div class="tc-title">Live Devices</div>
+        <div class="tc-time">${otherBuses.length} device${otherBuses.length>1?'s':''} · Real GPS</div>
+        <div class="tc-strips">${otherBuses.map(stripHtml).join('')}</div>
+        <button class="tc-btn am-btn" onclick="showBusList('all','All Live Devices')">View All &amp; Track →</button>
+      </div>
+    </div>` : '';
+
   sec.innerHTML = `
-    ${offlineBanner}${sosBanner}
-    <div class="trips-title" style="margin-top:${(sosId||!backendOnline)?'16px':'0'}">${label} — Scheduled Trips</div>
-    <div class="trips-grid">
-      <div class="trip-card morning">
-        <div class="trip-card-bar"></div>
-        <div class="trip-card-body">
-          <div class="tc-top"><div class="tc-icon">🌅</div><span class="tc-badge badge-am">8:00 AM</span></div>
-          <div class="tc-title">Morning to College</div>
-          <div class="tc-time">${amBuses.length} buses · Live GPS</div>
-          <div class="tc-meta">
-            <div class="tc-chip">🚌 <b>${amBuses.length}</b> Buses</div>
-            <div class="tc-chip">📍 Live GPS</div>
-          </div>
-          <div class="tc-strips">${amBuses.map(stripHtml).join('')}</div>
-          <button class="tc-btn am-btn" onclick="showBusList('8am','Morning to College — 8:00 AM')">View All Buses &amp; Track →</button>
-        </div>
-      </div>
-      <div class="trip-card return">
-        <div class="trip-card-bar"></div>
-        <div class="trip-card-body">
-          <div class="tc-top"><div class="tc-icon">🌆</div><span class="tc-badge badge-pm">3:00 PM</span></div>
-          <div class="tc-title">Return from College</div>
-          <div class="tc-time">${pmBuses.length} buses · Live GPS</div>
-          <div class="tc-meta">
-            <div class="tc-chip">🚌 <b>${pmBuses.length}</b> Buses</div>
-            <div class="tc-chip">📍 Live GPS</div>
-          </div>
-          <div class="tc-strips">${pmBuses.map(stripHtml).join('')}</div>
-          <button class="tc-btn pm-btn" onclick="showBusList('3pm','Return from College — 3:00 PM')">View All Buses &amp; Track →</button>
-        </div>
-      </div>
-    </div>`;
+    ${sosBanner}
+    <div class="trips-title" style="margin-top:${sosId?'16px':'0'}">${label} — Live Fleet</div>
+    <div class="trips-grid">${amSection}${pmSection}${otherSection}</div>`;
 }
 
 function updateHomeStrips() {
   if (!document.getElementById('homeView').classList.contains('active')) return;
-  Object.keys(BMETA).forEach(id => {
+  Object.keys(sim).filter(id => sim[id].lastUpdate > 0).forEach(id => {
     const b = sim[id];
     const hasData = b && b.lastUpdate > 0;
     const spdPct = hasData ? spct(b.speed) : 0;
@@ -339,9 +353,10 @@ setInterval(updateHomeStrips, 3000);
 function doSearch() {
   const v = document.getElementById('srchIn').value.trim().toLowerCase();
   if (v.length < 2) { alert('Please enter at least 2 characters.'); return; }
-  const exact = Object.keys(BMETA).find(id =>
-    BMETA[id].num.toLowerCase().includes(v) ||
-    BMETA[id].route.toLowerCase().includes(v) ||
+  // Search only buses that have real data
+  const exact = Object.keys(sim).filter(id => sim[id].lastUpdate > 0).find(id =>
+    (BMETA[id]?.num  || '').toLowerCase().includes(v) ||
+    (BMETA[id]?.route|| '').toLowerCase().includes(v) ||
     id.toLowerCase().includes(v)
   );
   if (exact) { openTracker(exact); return; }
@@ -381,7 +396,9 @@ function applyFilter(f, btn) {
 
 // US-28: overspeed badge  US-30: offline detection
 function renderTable(trip, f) {
+  // Only show buses that have sent real data
   let rows = Object.values(sim).filter(b => {
+    if (b.lastUpdate === 0) return false;
     if (trip === '8am') return BMETA[b.id]?.trip === '8am';
     if (trip === '3pm') return BMETA[b.id]?.trip === '3pm';
     return true;
