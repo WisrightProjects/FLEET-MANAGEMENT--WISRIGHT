@@ -125,9 +125,13 @@ async function syncFromAPI() {
       if (sim[id].speed < 6) { if (!sim[id].stopSince) sim[id].stopSince = Date.now(); }
       else sim[id].stopSince = null;
 
-      // Accumulate GPS trail (cap at 120 points)
-      sim[id].trail.push([t.lat, t.lon]);
-      if (sim[id].trail.length > 120) sim[id].trail.shift();
+      // Accumulate GPS trail — only push when position actually changes
+      const tr = sim[id].trail;
+      const last = tr[tr.length - 1];
+      if (!last || last[0] !== t.lat || last[1] !== t.lon) {
+        tr.push([t.lat, t.lon]);
+        if (tr.length > 120) tr.shift();
+      }
     });
   } catch {
     if (backendOnline) {
@@ -503,8 +507,10 @@ function shareTracker() {
 
 // US-25: deep link via URL hash
 function openTracker(id) {
+  // Clear any running interval synchronously — prevents double-click race
+  if (tickId) { clearInterval(tickId); tickId = null; }
   curBus = id;
-  const m = BMETA[id];
+  const m = BMETA[id] || {num: id, route: 'Live GPS Device', color: '#a5b4fc'};
   document.getElementById('trkName').textContent = m.num;
   document.getElementById('trkSub').textContent  = m.route;
   location.hash = id;
@@ -513,12 +519,11 @@ function openTracker(id) {
   setTimeout(() => {
     ensureMap(); lmap.invalidateSize();
     const b = sim[id];
-    const hasData = b.lastUpdate > 0 && b.lat !== null;
+    const hasData = b && b.lastUpdate > 0 && b.lat !== null;
     const center  = hasData ? [b.lat, b.lon] : [13.05, 80.22];
-    if (!lmarker) lmarker = L.marker(center, {icon: busIcon(m.color, !!b.sos)}).addTo(lmap);
-    lmap.flyTo(center, 15, {animate: true, duration: 1.2});
+    if (!lmarker) lmarker = L.marker(center, {icon: busIcon(m.color, !!(b && b.sos))}).addTo(lmap);
+    lmap.flyTo(center, hasData ? 15 : 12, {animate: true, duration: 1.2});
     updateTele(id);
-    if (tickId) clearInterval(tickId);
     tickId = setInterval(() => updateTele(id), 3000);
   }, 80);
 }
@@ -543,7 +548,8 @@ function acknowledgeSOSFor(id) {
 
 // US-26 / US-28 / US-31: updateTele
 function updateTele(id) {
-  const b = sim[id], m = BMETA[id];
+  if (!sim[id]) return; // backend hasn't returned data for this device yet
+  const b = sim[id], m = BMETA[id] || {num: id, route: 'Live GPS Device', color: '#a5b4fc'};
   const hasData     = b.lastUpdate > 0 && b.lat !== null;
   const isSos       = !!b.sos;
   const sc          = sclr(b.speed);
@@ -680,5 +686,5 @@ function updateTele(id) {
 ═══════════════════════════════ */
 window.addEventListener('load', () => {
   const hash = location.hash.slice(1);
-  if (hash && BMETA[hash]) openTracker(hash);
+  if (hash) openTracker(hash); // works for any device ID, sim[hash] guard is inside updateTele
 });
