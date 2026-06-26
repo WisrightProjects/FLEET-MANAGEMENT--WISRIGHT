@@ -1,32 +1,64 @@
 /* ═══════════════════════════════
-   SIMULATION DATA
+   GEOFENCE DATA — seeded from backend /telemetry/stops/config
+   Fallback to Chennai stops until first API response
 ═══════════════════════════════ */
-const GEO=[
-  {id:'campus_main', name:'Campus Gate',      lat:13.1100,lon:80.1580,r:300},
-  {id:'anna_nagar', name:'Anna Nagar Stop',   lat:13.0850,lon:80.2100,r:160},
-  {id:'kk_nagar',   name:'KK Nagar Stop',     lat:13.0590,lon:80.2080,r:160},
-  {id:'t_nagar',    name:'T Nagar Hub',        lat:13.0418,lon:80.2341,r:160},
-  {id:'adyar',      name:'Adyar Terminal',     lat:13.0012,lon:80.2565,r:160},
-  {id:'velachery',  name:'Velachery Stop',     lat:12.9815,lon:80.2180,r:160},
-  {id:'depot',      name:'Main Depot',         lat:13.0000,lon:80.2400,r:220},
+let GEO=[
+  {id:'chennai_central',   name:'Chennai Central',   lat:13.0827,lon:80.2707,r:300},
+  {id:'egmore',            name:'Egmore',            lat:13.0784,lon:80.2617,r:300},
+  {id:'royapettah',        name:'Royapettah',        lat:13.0524,lon:80.2623,r:300},
+  {id:'t_nagar_bus_stand', name:'T Nagar Bus Stand', lat:13.0418,lon:80.2341,r:300},
+  {id:'vadapalani',        name:'Vadapalani',         lat:13.0524,lon:80.2121,r:300},
+  {id:'anna_nagar',        name:'Anna Nagar',         lat:13.0850,lon:80.2101,r:300},
+  {id:'guindy',            name:'Guindy',             lat:13.0067,lon:80.2206,r:300},
+  {id:'adyar',             name:'Adyar',              lat:13.0012,lon:80.2565,r:300},
+  {id:'koyambedu',         name:'Koyambedu',          lat:13.0694,lon:80.1948,r:300},
+  {id:'perambur',          name:'Perambur',            lat:13.1175,lon:80.2479,r:300},
+  {id:'avadi',             name:'Avadi',              lat:13.1132,lon:80.1050,r:300},
+  {id:'porur_junction',    name:'Porur Junction',     lat:13.0359,lon:80.1569,r:300},
 ];
+let geoLayerGroup=null; // map layer group for geofence circles
 
+async function loadStopsConfig(){
+  try{
+    const r=await fetch(`${BACKEND}/telemetry/stops/config`,{signal:AbortSignal.timeout(3000)});
+    if(!r.ok) return;
+    const d=await r.json();
+    const radius=d.radius_m||300;
+    GEO=(d.data||[]).map(s=>({
+      id:s.name.toLowerCase().replace(/\s+/g,'_'),
+      name:s.name, lat:s.lat, lon:s.lon, r:radius
+    }));
+    if(mapInit) refreshMapGeofences();
+  }catch{}
+}
+
+function refreshMapGeofences(){
+  if(!lmap) return;
+  if(geoLayerGroup) geoLayerGroup.clearLayers();
+  else{ geoLayerGroup=L.layerGroup().addTo(lmap); }
+  GEO.forEach(g=>{
+    L.circle([g.lat,g.lon],{radius:g.r,color:'#7b2d8b',fillColor:'#7b2d8b',fillOpacity:.07,weight:1.5,dashArray:'6 4'}).addTo(geoLayerGroup).bindPopup(`<b>${g.name}</b>`);
+    L.circleMarker([g.lat,g.lon],{radius:4,color:'#7b2d8b',fillColor:'#7b2d8b',fillOpacity:.7,weight:2}).addTo(geoLayerGroup).bindTooltip(g.name,{direction:'top'});
+  });
+}
+
+// Simulation fallback routes (real Chennai stops, used only when backend is offline)
 const ROUTES={
-  'VTUESP32-0091':[[13.1100,80.1580],[13.0850,80.2100],[13.0590,80.2080],[13.0418,80.2341],[13.0012,80.2565],[12.9815,80.2180],[13.0000,80.2400],[13.1100,80.1580]],
-  'VTUESP32-0092':[[13.1100,80.1580],[13.0590,80.2080],[13.0000,80.2400],[12.9815,80.2180],[13.0012,80.2565],[13.0418,80.2341],[13.0850,80.2100],[13.1100,80.1580]],
-  'VTUESP32-0093':[[12.9815,80.2180],[13.0012,80.2565],[13.0418,80.2341],[13.0590,80.2080],[13.0850,80.2100],[13.1100,80.1580],[13.0590,80.2080],[12.9815,80.2180]],
-  'VTUESP32-0094':[[13.0418,80.2341],[13.0000,80.2400],[12.9815,80.2180],[13.0012,80.2565],[13.0418,80.2341]],
-  'VTUESP32-0095':[[13.1100,80.1580],[13.0850,80.2100],[13.0418,80.2341],[13.0000,80.2400],[13.1100,80.1580]],
-  'VTUESP32-0096':[[13.0012,80.2565],[12.9815,80.2180],[13.0000,80.2400],[13.0590,80.2080],[13.1100,80.1580]],
+  'VTUESP32-0091':[[13.1132,80.1050],[13.0850,80.2101],[13.0694,80.1948],[13.0418,80.2341],[13.0067,80.2206],[13.0012,80.2565],[13.0784,80.2617],[13.0827,80.2707],[13.1132,80.1050]],
+  'VTUESP32-0092':[[13.0827,80.2707],[13.1175,80.2479],[13.0850,80.2101],[13.0694,80.1948],[13.0359,80.1569],[13.0524,80.2121],[13.0418,80.2341],[13.0827,80.2707]],
+  'VTUESP32-0093':[[13.0012,80.2565],[13.0067,80.2206],[13.0418,80.2341],[13.0524,80.2121],[13.0694,80.1948],[13.0850,80.2101],[13.1175,80.2479],[13.0012,80.2565]],
+  'VTUESP32-0094':[[13.0418,80.2341],[13.0524,80.2623],[13.0784,80.2617],[13.0827,80.2707],[13.1175,80.2479],[13.0418,80.2341]],
+  'VTUESP32-0095':[[13.1132,80.1050],[13.0694,80.1948],[13.0359,80.1569],[13.0524,80.2121],[13.0418,80.2341],[13.1132,80.1050]],
+  'VTUESP32-0096':[[13.0012,80.2565],[13.0067,80.2206],[13.0359,80.1569],[13.0694,80.1948],[13.1132,80.1050],[13.0012,80.2565]],
 };
 
 const BMETA={
-  'VTUESP32-0091':{num:'Bus 91',route:'Poonamallee → Anna Nagar → Campus',   color:'#58a6ff',base:52,trip:'8am',sos:0},
-  'VTUESP32-0092':{num:'Bus 92',route:'Tambaram → KK Nagar → Campus',        color:'#3fb950',base:45,trip:'8am',sos:0},
-  'VTUESP32-0093':{num:'Bus 93',route:'Velachery → T Nagar → Campus',        color:'#d29922',base:38,trip:'3pm',sos:0},
-  'VTUESP32-0094':{num:'Bus 94',route:'T Nagar Loop — Main Depot',            color:'#f85149',base:0, trip:'3pm',sos:1},
-  'VTUESP32-0095':{num:'Bus 95',route:'Ambattur → Anna Nagar → Campus',      color:'#f97316',base:48,trip:'8am',sos:0},
-  'VTUESP32-0096':{num:'Bus 96',route:'Adyar → Velachery → Campus',          color:'#ec4899',base:41,trip:'3pm',sos:0},
+  'VTUESP32-0091':{num:'Bus 91',route:'Avadi → Anna Nagar → Central',        color:'#58a6ff',base:52,trip:'8am',sos:0},
+  'VTUESP32-0092':{num:'Bus 92',route:'Central → Perambur → Koyambedu',      color:'#3fb950',base:45,trip:'8am',sos:0},
+  'VTUESP32-0093':{num:'Bus 93',route:'Adyar → Guindy → Koyambedu',          color:'#d29922',base:38,trip:'3pm',sos:0},
+  'VTUESP32-0094':{num:'Bus 94',route:'T Nagar → Egmore → Central Loop',     color:'#f85149',base:0, trip:'3pm',sos:1},
+  'VTUESP32-0095':{num:'Bus 95',route:'Avadi → Porur → Vadapalani',          color:'#f97316',base:48,trip:'8am',sos:0},
+  'VTUESP32-0096':{num:'Bus 96',route:'Adyar → Guindy → Porur → Avadi',     color:'#ec4899',base:41,trip:'3pm',sos:0},
 };
 
 const BACKEND='http://localhost:5000';
@@ -37,7 +69,8 @@ let selFilter='all', curList='all', curBus=null, tickId=null;
 
 Object.entries(ROUTES).forEach(([id,r])=>{
   sim[id]={id,ri:0,prog:Math.random(),lat:r[0][0],lon:r[0][1],speed:0,geo:null,stop:false,
-           sos:BMETA[id].sos,ts:new Date().toISOString(),trail:[],stopSince:null,lastUpdate:Date.now()};
+           sos:BMETA[id].sos,ts:new Date().toISOString(),trail:[],stopSince:null,
+           lastUpdate:Date.now(),liveTs:0};
 });
 
 function hav(a,b,c,d){
@@ -54,6 +87,8 @@ function spct(s,b){return Math.min(100,Math.round(s/((b||1)+20)*100))}
 
 function simTick(){
   Object.values(sim).forEach(b=>{
+    // If real backend data arrived in the last 8 s, freeze simulation for this bus
+    if(b.liveTs && (Date.now()-b.liveTs)<8000) return;
     const m=BMETA[b.id], r=ROUTES[b.id];
     if(b.sos&&m.base===0){b.speed=0;b.stop=true;b.ts=new Date().toISOString();b.lastUpdate=Date.now();return}
     b.prog+=.018+Math.random()*.01;
@@ -89,13 +124,23 @@ async function syncFromAPI(){
     }
     rows.forEach(t=>{
       const id=t.dev_id;
-      if(!sim[id]) return;
+      // Auto-register devices that arrive from real hardware but aren't in BMETA
+      if(!sim[id]){
+        const r=ROUTES[id]||[[t.lat,t.lon],[t.lat,t.lon]];
+        sim[id]={id,ri:0,prog:0,lat:t.lat,lon:t.lon,speed:0,geo:null,stop:false,
+                 sos:0,ts:new Date().toISOString(),trail:[],stopSince:null,
+                 lastUpdate:Date.now(),liveTs:0};
+        if(!BMETA[id]) BMETA[id]={num:id.replace('VTUESP32-','Bus '),route:'Live GPS',
+                                   color:'#a5b4fc',base:40,trip:'8am',sos:0};
+        if(!ROUTES[id]) ROUTES[id]=[[t.lat,t.lon],[t.lat,t.lon]];
+      }
       sim[id].lat=t.lat; sim[id].lon=t.lon;
       sim[id].speed=parseFloat(t.speed_kmh)||0;
       sim[id].sos=t.sos_active?1:0;
       sim[id].ts=new Date(t.timestamp*1000).toISOString();
       sim[id].stop=(sim[id].speed<6);
       sim[id].lastUpdate=Date.now();
+      sim[id].liveTs=Date.now(); // mark as live — suppresses simTick for this bus
       const gf=chkGeo(t.lat,t.lon);
       sim[id].geo=gf||null;
       if(sim[id].speed<6){ if(!sim[id].stopSince) sim[id].stopSince=Date.now(); }
@@ -111,6 +156,7 @@ async function syncFromAPI(){
 }
 setInterval(syncFromAPI,3000);
 syncFromAPI();
+loadStopsConfig();
 
 async function fetchStopEvents(id){
   try{
@@ -372,10 +418,8 @@ function ensureMap(){
   if(mapInit)return;
   lmap=L.map('liveMap',{zoomControl:true}).setView([13.05,80.22],13);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',attribution:'© OpenStreetMap',maxZoom:19}).addTo(lmap);
-  GEO.forEach(g=>{
-    L.circle([g.lat,g.lon],{radius:g.r,color:'#7b2d8b',fillColor:'#7b2d8b',fillOpacity:.07,weight:1.5,dashArray:'6 4'}).addTo(lmap).bindPopup(`<b>${g.name}</b>`);
-    L.circleMarker([g.lat,g.lon],{radius:4,color:'#7b2d8b',fillColor:'#7b2d8b',fillOpacity:.7,weight:2}).addTo(lmap).bindTooltip(g.name,{direction:'top'});
-  });
+  geoLayerGroup=L.layerGroup().addTo(lmap);
+  refreshMapGeofences();
   ltrail=L.polyline([],{color:'#58a6ff',weight:3,opacity:.4,dashArray:'5 5'}).addTo(lmap);
   mapInit=true;
 }
@@ -396,14 +440,28 @@ function busIcon(color,sos){
 }
 
 // US-21: ETA to next stop in minutes
+// When live GPS is active, find nearest stop that is NOT the current geofence.
+// Falls back to route waypoints when simulating offline.
 function etaToNextStop(b){
   if(b.speed<2) return null;
+  if(b.liveTs&&(Date.now()-b.liveTs)<30000){
+    // Real GPS path — nearest stop ahead excluding current geofence
+    let best=null, bestDist=Infinity;
+    GEO.forEach(g=>{
+      if(b.geo&&g.name===b.geo.name) return;
+      const d=hav(b.lat,b.lon,g.lat,g.lon);
+      if(d<bestDist){bestDist=d;best=g;}
+    });
+    if(!best) return null;
+    return Math.max(1,Math.round(bestDist/(b.speed*1000/60)));
+  }
+  // Simulation fallback
   const r=ROUTES[b.id];
+  if(!r) return null;
   const nextIdx=(b.ri+1)%r.length;
   const [nlat,nlon]=r[nextIdx];
   const distM=hav(b.lat,b.lon,nlat,nlon);
-  const etaMin=distM/(b.speed*1000/60);
-  return Math.max(1,Math.round(etaMin));
+  return Math.max(1,Math.round(distM/(b.speed*1000/60)));
 }
 
 // US-25: copy tracker link to clipboard

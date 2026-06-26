@@ -10,6 +10,7 @@ import mysql.connector
 import time
 import math
 import os
+import collections
 
 app = Flask(__name__)
 CORS(app)
@@ -36,6 +37,32 @@ DB_CONFIG = {
     "password": os.environ.get("MYSQL_PASSWORD", ""),
     "database": os.environ.get("MYSQL_DATABASE", "telematics"),
 }
+
+# ---------------------------------------------------------------------------
+# Device auth & rate limiting
+# ---------------------------------------------------------------------------
+
+DEVICE_TOKEN = os.environ.get("DEVICE_TOKEN", "")
+
+# Per-device rate limit: max 2 requests per second (token bucket, 2 tokens/s)
+_rate_buckets: dict = {}          # dev_id → {"tokens": float, "last": float}
+_RATE_MAX     = 2.0               # burst capacity
+_RATE_REFILL  = 2.0               # tokens added per second
+
+
+def _check_rate(dev_id: str) -> bool:
+    """Return True if request is allowed, False if rate-limited."""
+    now = time.time()
+    if dev_id not in _rate_buckets:
+        _rate_buckets[dev_id] = {"tokens": _RATE_MAX, "last": now}
+    b = _rate_buckets[dev_id]
+    elapsed = now - b["last"]
+    b["tokens"] = min(_RATE_MAX, b["tokens"] + elapsed * _RATE_REFILL)
+    b["last"] = now
+    if b["tokens"] >= 1.0:
+        b["tokens"] -= 1.0
+        return True
+    return False
 
 # ---------------------------------------------------------------------------
 # Known bus stops / depots — geofence targets
@@ -228,10 +255,6 @@ def validate(data, schema):
 def dashboard():
     return send_from_directory(os.path.dirname(__file__), "dashboard.html")
 
-@app.route("/mock")
-def mock_dashboard():
-    return send_from_directory(os.path.dirname(__file__), "mock.html")
-
 @app.route("/dashboard.css")
 def dashboard_css():
     return send_from_directory(os.path.dirname(__file__), "dashboard.css")
@@ -257,10 +280,19 @@ def health():
 
 @app.route("/telemetry", methods=["POST"])
 def post_telemetry():
+    # Auth: if DEVICE_TOKEN is configured, every POST must carry the matching header
+    if DEVICE_TOKEN:
+        if request.headers.get("X-Device-Token") != DEVICE_TOKEN:
+            return jsonify({"status": "error", "message": "Unauthorized."}), 401
+
     data = request.get_json(silent=True)
     valid, error = validate(data, REQUIRED_TELEMETRY)
     if not valid:
         return jsonify({"status": "error", "message": error}), 400
+
+    # Rate limit per device (checked after we have dev_id from body)
+    if not _check_rate(data.get("dev_id", "")):
+        return jsonify({"status": "error", "message": "Rate limit exceeded."}), 429
     if data["sos_active"] not in (0, 1):
         return jsonify({"status": "error", "message": "Field 'sos_active' must be 0 or 1."}), 400
     if not (-90 <= data["lat"] <= 90):
