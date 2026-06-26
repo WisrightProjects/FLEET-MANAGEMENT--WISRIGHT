@@ -132,6 +132,13 @@ function tick(){
   const n=new Date();
   document.getElementById('homeClock').textContent=
     n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
+  // US-24: show today's date
+  const dateEl=document.getElementById('homeDate');
+  if(dateEl){
+    const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    dateEl.textContent=`${days[n.getDay()]}, ${n.getDate()} ${months[n.getMonth()]} ${n.getFullYear()}`;
+  }
   const all=Object.values(sim);
   document.getElementById('sMoving').textContent=all.filter(b=>!b.stop&&!b.sos).length;
   document.getElementById('sStopped').textContent=all.filter(b=>b.stop&&!b.sos).length;
@@ -348,7 +355,7 @@ function renderTable(trip,f){
       <td style="max-width:150px;font-size:.76rem;color:#a8a29e">${m.route}</td>
       <td><span class="sdot ${dotCls}"></span>${stTxt}</td>
       <td><b style="color:${sc}">${b.speed}</b> km/h ${overspeedBadge}</td>
-      <td style="font-size:.74rem;color:#a8a29e">${isOffline?`<span style="color:#6b7280;font-size:.7rem">Last: ${new Date(b.lastUpdate).toLocaleTimeString()}</span>`:geo}</td>
+      <td style="font-size:.74rem;color:#a8a29e">${isOffline?`<span style="color:#6b7280;font-size:.7rem">Last: ${new Date(b.lastUpdate).toLocaleTimeString()}</span>`:geo}${(()=>{const e=etaToNextStop(b);return e&&!isOffline?`<br><span style="color:#58a6ff;font-size:.68rem">~${e} min to next stop</span>`:''})()}</td>
       <td><button class="trk-btn${isSos?' sos':''}" onclick="openTracker('${b.id}')">📍 Track</button></td>
     </tr>`;
   }).join('');
@@ -386,6 +393,30 @@ function busIcon(color,sos){
     </svg>
     ${sos?'<div style="position:absolute;top:0;right:0;width:10px;height:10px;background:#f85149;border-radius:50%;border:2px solid #0d1117;animation:pa .8s infinite"></div>':''}
   </div>`,iconSize:[44,44],iconAnchor:[22,40],popupAnchor:[0,-40]});
+}
+
+// US-21: ETA to next stop in minutes
+function etaToNextStop(b){
+  if(b.speed<2) return null;
+  const r=ROUTES[b.id];
+  const nextIdx=(b.ri+1)%r.length;
+  const [nlat,nlon]=r[nextIdx];
+  const distM=hav(b.lat,b.lon,nlat,nlon);
+  const etaMin=distM/(b.speed*1000/60);
+  return Math.max(1,Math.round(etaMin));
+}
+
+// US-25: copy tracker link to clipboard
+function shareTracker(){
+  const url=window.location.href;
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(url).then(()=>{
+      const btn=document.querySelector('.share-btn');
+      if(btn){const orig=btn.textContent;btn.textContent='✓ Copied!';setTimeout(()=>{btn.textContent=orig},2000);}
+    }).catch(()=>prompt('Copy this link:',url));
+  } else {
+    prompt('Copy this link:',url);
+  }
 }
 
 // US-25: deep link via URL hash
@@ -455,6 +486,19 @@ function updateTele(id){
   mp.textContent=b.stop?'⏸ Stopped':'▶ Moving';
   mp.className='mpill '+(b.stop?'mpill-st':'mpill-mv');
 
+  // US-21: ETA to next stop in tracker panel
+  let etaEl=document.getElementById('tEta');
+  const eta=etaToNextStop(b);
+  if(eta){
+    if(!etaEl){
+      etaEl=document.createElement('div');
+      etaEl.id='tEta';
+      etaEl.style.cssText='margin-top:6px;font-size:.73rem;color:#58a6ff;font-family:"IBM Plex Mono",monospace';
+      document.getElementById('tSpdBar').parentNode.appendChild(etaEl);
+    }
+    etaEl.textContent=`⏱ ~${eta} min to next stop`;
+  } else if(etaEl){ etaEl.remove(); }
+
   // US-26: "bus appears stopped" notice
   const stoppedMs=b.stopSince?(Date.now()-b.stopSince):0;
   let stoppedNotice=document.getElementById('stopped-notice');
@@ -519,9 +563,11 @@ function updateTele(id){
         const dwell=s.duration_sec!=null
           ?(Math.floor(s.duration_sec/60)>0?Math.floor(s.duration_sec/60)+'m ':'')+(Math.round(s.duration_sec%60))+'s'
           :null;
-        return`<div class="log-row">
-          <div class="log-nm">🏁 ${s.location_name}</div>
-          <div class="log-mt">Arrived ${arr}${dwell?` · <span class="log-dw">Dwell: ${dwell}</span>`:' · <span class="log-in">Currently inside</span>'}</div>
+        // US-29: highlight rows where dwell > 10 minutes
+        const longDwell=s.duration_sec!=null&&s.duration_sec>600;
+        return`<div class="log-row${longDwell?' log-row-delay':''}">
+          <div class="log-nm">🏁 ${s.location_name}${longDwell?' <span class="log-delay-tag">DELAY</span>':''}</div>
+          <div class="log-mt">Arrived ${arr}${dwell?` · <span class="log-dw${longDwell?' log-dw-warn':''}">Dwell: ${dwell}</span>`:' · <span class="log-in">Currently inside</span>'}</div>
         </div>`;
       }).join('');
     });

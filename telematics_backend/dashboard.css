@@ -416,6 +416,23 @@ tbody td b{color:#fafaf9}
 }
 .sos-ack-btn:hover{background:#991b1b;color:#fff}
 
+/* US-25: share button */
+.share-btn{
+  margin-left:8px;padding:5px 12px;border:1px solid #30363d;border-radius:7px;
+  background:#21262d;color:#c9d1d9;font-size:.72rem;font-weight:600;cursor:pointer;
+  font-family:'Space Grotesk',sans-serif;transition:background .15s;white-space:nowrap;
+}
+.share-btn:hover{background:#30363d;color:#fff}
+
+/* US-29: dwell delay highlight in landmark log */
+.log-row-delay{border-color:#7f1d1d!important;background:#1c0a0a!important}
+.log-delay-tag{
+  display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;
+  background:#7f1d1d;color:#fca5a5;font-size:.62rem;font-weight:700;
+  font-family:'IBM Plex Mono',monospace;vertical-align:middle;
+}
+.log-dw-warn{color:#f85149!important;font-weight:700}
+
 /* ── RESPONSIVE ── */
 @media(max-width:900px){
   .trk-body{grid-template-columns:1fr 270px}

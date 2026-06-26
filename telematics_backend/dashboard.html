@@ -26,7 +26,10 @@
         <div class="org-sub">IoT Live Bus Tracker · GPS Powered</div>
       </div>
     </div>
-    <div class="h-clock" id="homeClock">--:--:--</div>
+    <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:1px">
+      <div class="h-clock" id="homeClock">--:--:--</div>
+      <div id="homeDate" style="font-size:.58rem;color:rgba(255,255,255,.6);font-family:'IBM Plex Mono',monospace;white-space:nowrap"></div>
+    </div>
     <div id="backendBadge" style="font-size:.65rem;font-weight:600;color:#fca5a5;white-space:nowrap;margin-left:8px">🔴 Offline</div>
   </nav>
 
@@ -99,6 +102,7 @@
       <div class="trk-sub"  id="trkSub">—</div>
     </div>
     <div class="live-pill"><span class="pdot"></span> LIVE</div>
+    <button class="share-btn" onclick="shareTracker()" title="Copy link to this bus">🔗 Share</button>
   </div>
 
   <div class="trk-body">
