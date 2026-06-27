@@ -466,7 +466,9 @@ def health():
 @app.route("/telemetry", methods=["POST"])
 def post_telemetry():
     if DEVICE_TOKEN:
-        if request.headers.get("X-Device-Token") != DEVICE_TOKEN:
+        # Accept both "Token" (ESP32 firmware) and "X-Device-Token" (standard)
+        token = request.headers.get("Token") or request.headers.get("X-Device-Token") or ""
+        if token != DEVICE_TOKEN:
             return jsonify({"status": "error", "message": "Unauthorized."}), 401
 
     data = request.get_json(silent=True)

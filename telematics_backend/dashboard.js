@@ -9,15 +9,21 @@ const BACKEND = window.location.port
   : `${window.location.protocol}//${window.location.hostname}`;
 let backendOnline = false;
 
-/* ── Bus display metadata (config only — not data) ── */
-const BMETA = {
-  'VTUESP32-0091':{num:'Bus 91',route:'Avadi → Anna Nagar → Central',    color:'#58a6ff',trip:'8am'},
-  'VTUESP32-0092':{num:'Bus 92',route:'Central → Perambur → Koyambedu', color:'#3fb950',trip:'8am'},
-  'VTUESP32-0093':{num:'Bus 93',route:'Adyar → Guindy → Koyambedu',     color:'#d29922',trip:'3pm'},
-  'VTUESP32-0094':{num:'Bus 94',route:'T Nagar → Egmore → Central',     color:'#f85149',trip:'3pm'},
-  'VTUESP32-0095':{num:'Bus 95',route:'Avadi → Porur → Vadapalani',     color:'#f97316',trip:'8am'},
-  'VTUESP32-0096':{num:'Bus 96',route:'Adyar → Guindy → Porur → Avadi',color:'#ec4899',trip:'3pm'},
-};
+/* ── Bus display metadata — populated dynamically from real device IDs ── */
+const BMETA = {};
+const BUS_COLORS = ['#58a6ff','#3fb950','#d29922','#f85149','#f97316','#ec4899','#a5b4fc','#34d399'];
+let _busColorIdx = 0;
+function registerDevice(id) {
+  if (BMETA[id]) return;
+  const suffix = id.replace(/\D+0*/,'');
+  const num = suffix ? 'Bus ' + suffix : id;
+  BMETA[id] = {
+    num,
+    route: 'Live GPS Device',
+    color: BUS_COLORS[_busColorIdx++ % BUS_COLORS.length],
+    trip: '8am'
+  };
+}
 
 /* ── Live state cache — entries created ONLY when real data arrives from backend ── */
 const sim = {};
@@ -113,11 +119,8 @@ async function syncFromAPI() {
         sim[id] = {id, lat: null, lon: null, speed: 0, sos: 0,
                    geo: null, stop: false, stopSince: null,
                    ts: null, trail: [], lastUpdate: 0};
-        if (!BMETA[id]) BMETA[id] = {
-          num: id.replace('VTUESP32-0', 'Bus '),
-          route: 'Live GPS Device', color: '#a5b4fc', trip: '8am'
-        };
       }
+      registerDevice(id);
 
       sim[id].lat   = t.lat;
       sim[id].lon   = t.lon;
