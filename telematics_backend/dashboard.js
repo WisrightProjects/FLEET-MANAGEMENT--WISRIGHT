@@ -481,17 +481,22 @@ setInterval(() => {
 /* ═══════════════════════════════
    TRACKER
 ═══════════════════════════════ */
-let lmap = null, lmarker = null, ltrail = null, mapInit = false;
+let lmap = null, lmarker = null, ltrail = null;
 
-function ensureMap() {
-  if (mapInit) return;
-  lmap = L.map('liveMap', {zoomControl: true}).setView([13.05, 80.22], 13);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd', attribution:'© OpenStreetMap', maxZoom:19}).addTo(lmap);
+function destroyMap() {
+  if (lmap) { lmap.remove(); lmap = null; }
+  lmarker = null; ltrail = null; geoLayerGroup = null;
+}
+
+function initMap(lat, lon, zoom) {
+  destroyMap();
+  lmap = L.map('liveMap', { zoomControl: true, preferCanvas: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(lmap);
   geoLayerGroup = L.layerGroup().addTo(lmap);
   refreshMapGeofences();
-  ltrail = L.polyline([], {color:'#58a6ff', weight:3, opacity:.5, dashArray:'5 5'}).addTo(lmap);
-  mapInit = true;
+  ltrail = L.polyline([], { color: '#58a6ff', weight: 3, opacity: .6, dashArray: '5 5' }).addTo(lmap);
+  lmap.setView([lat, lon], zoom);
 }
 
 function busIcon(color, sos) {
@@ -546,26 +551,15 @@ function openTracker(id) {
   location.hash = id;
   showV('trackerView');
 
-  // Two rAF cycles guarantee the browser has finished layout before Leaflet
-  // measures the container — prevents tile offset / wrong-position bug
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    ensureMap();
-    lmap.invalidateSize({ pan: false });
-
     const b = sim[id];
     const hasData = b && b.lastUpdate > 0 && b.lat !== null;
-    const center  = hasData ? [b.lat, b.lon] : [13.05, 80.22];
-    const zoom    = hasData ? 16 : 12;
+    const lat  = hasData ? b.lat  : 13.0694;
+    const lon  = hasData ? b.lon  : 80.1948;
+    const zoom = hasData ? 16 : 13;
 
-    if (!lmarker) {
-      lmarker = L.marker(center, {icon: busIcon(m.color, !!(b && b.sos))}).addTo(lmap);
-    } else {
-      lmarker.setLatLng(center);
-    }
-    lmap.setView(center, zoom, { animate: false });
-
-    // Second invalidate after setView so tiles snap to correct positions
-    lmap.invalidateSize({ pan: false });
+    initMap(lat, lon, zoom);
+    lmarker = L.marker([lat, lon], { icon: busIcon(m.color, !!(b && b.sos)) }).addTo(lmap);
 
     updateTele(id);
     currentTripId = null;
@@ -586,8 +580,7 @@ function openTracker(id) {
 
 function leaveTracker() {
   if (tickId) { clearInterval(tickId); tickId = null; }
-  if (lmarker) { lmarker.remove(); lmarker = null; }
-  if (ltrail)  { ltrail.setLatLngs([]); }
+  destroyMap();
   // Reset trip UI — trip stays active on backend, just hidden
   currentTripId = null;
   const btn = document.getElementById('tripActionBtn');
@@ -617,17 +610,12 @@ function updateTele(id) {
   const isOverspeed = b.speed > 70;
   const isOffline   = !hasData || (Date.now() - b.lastUpdate) > 30000;
 
-  if (hasData) {
-    if (!lmarker) {
-      lmarker = L.marker([b.lat, b.lon], {icon: busIcon(m.color, isSos)}).addTo(lmap);
-    } else {
-      lmarker.setLatLng([b.lat, b.lon]);
-      lmarker.setIcon(busIcon(m.color, isSos));
-    }
+  if (hasData && lmap && lmarker) {
+    lmarker.setLatLng([b.lat, b.lon]);
+    lmarker.setIcon(busIcon(m.color, isSos));
     lmarker.bindPopup(`<b>${m.num}</b><br>Speed: <b>${b.speed} km/h</b><br>${b.geo ? 'At: ' + b.geo.name : 'En route'}`);
     if (ltrail) { ltrail.setLatLngs(b.trail); ltrail.setStyle({color: m.color}); }
-    // Only pan if marker is outside the centre 60% of the visible map area
-    if (lmap && !lmap.getBounds().pad(-0.2).contains([b.lat, b.lon])) {
+    if (!lmap.getBounds().pad(-0.2).contains([b.lat, b.lon])) {
       lmap.panTo([b.lat, b.lon], {animate: true, duration: 0.5});
     }
   }
