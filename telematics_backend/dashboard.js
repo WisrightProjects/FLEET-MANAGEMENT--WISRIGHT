@@ -79,6 +79,14 @@ function hav(a, b, c, d) {
 }
 function chkGeo(la, lo) { return GEO.find(g => hav(la, lo, g.lat, g.lon) <= g.r) || null; }
 
+// Always returns the nearest stop with distance in metres
+function nearestStop(la, lo) {
+  if (!GEO.length) return null;
+  let best = null, bestDist = Infinity;
+  GEO.forEach(g => { const d = hav(la, lo, g.lat, g.lon); if (d < bestDist) { bestDist = d; best = g; } });
+  return { stop: best, dist: Math.round(bestDist) };
+}
+
 // US-05 / US-28: speed colour thresholds
 function sclr(s) { return s > 70 ? '#f85149' : s > 40 ? '#d29922' : '#3fb950'; }
 function spct(s) { return Math.min(100, Math.round(s / 80 * 100)); }
@@ -457,7 +465,10 @@ function renderTable(trip, f) {
     const sc  = sclr(b.speed);
     const dotCls = isSos ? 'sdot-sos' : isOffline ? 'sdot-off' : b.stop ? 'sdot-st' : 'sdot-mv';
     const stTxt  = isSos ? '⚠ SOS'   : isOffline ? 'No signal' : b.stop ? 'Stopped' : 'Moving';
-    const geo    = b.geo ? b.geo.name : hasData ? 'En route' : '—';
+    const ns     = (hasData && b.lat != null) ? nearestStop(b.lat, b.lon) : null;
+    const geo    = b.geo
+      ? `📍 ${b.geo.name}`
+      : ns ? `Near ${ns.stop.name} <span style="font-size:.65rem;color:#6b7280">(${ns.dist}m)</span>` : '—';
     const overspeedBadge = isOverspeed ? `<span class="overspeed-badge">OVERSPEED</span>` : '';
     return `<tr class="${isOffline ? 'offline-row' : ''}">
       <td><b>${m.num}</b></td>
@@ -693,10 +704,15 @@ function updateTele(id) {
     }
   } else if (ackBtn) { ackBtn.remove(); }
 
-  // Geofence
-  document.getElementById('tGeoIco').textContent = b.geo ? '📌' : '🛣️';
-  document.getElementById('tGeoNm').textContent  = b.geo ? b.geo.name : (hasData ? 'Outside all geofences' : 'Awaiting GPS signal');
-  document.getElementById('tGeoSb').textContent  = b.geo ? 'ID: ' + b.geo.id : (hasData ? 'En route between stops' : '—');
+  // Geofence — show nearest stop when outside all geofences
+  const geoNs = (hasData && b.lat != null) ? nearestStop(b.lat, b.lon) : null;
+  document.getElementById('tGeoIco').textContent = b.geo ? '📌' : (geoNs ? '🛣️' : '⏳');
+  document.getElementById('tGeoNm').textContent  = b.geo
+    ? b.geo.name
+    : geoNs ? `Near ${geoNs.stop.name}` : 'Awaiting GPS signal';
+  document.getElementById('tGeoSb').textContent  = b.geo
+    ? 'Inside geofence · ' + b.geo.id
+    : geoNs ? `${geoNs.dist} m away · En route` : '—';
 
   // Live JSON packet
   document.getElementById('tJson').textContent = JSON.stringify(hasData ? {

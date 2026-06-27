@@ -80,6 +80,7 @@ STOPS = [
     {"name": "Avadi",             "lat": 13.1132, "lon": 80.1050},
     {"name": "Porur Junction",    "lat": 13.0359, "lon": 80.1569},
     {"name": "Mogappair",         "lat": 13.0832, "lon": 80.1650},
+    {"name": "Maduravoyil",       "lat": 13.0523, "lon": 80.1760},
     # Update Office coordinates to your actual office GPS location
     {"name": "Office",            "lat": 13.0067, "lon": 80.2206},
 ]
