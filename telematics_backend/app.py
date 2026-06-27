@@ -746,9 +746,9 @@ def get_presence_count(dev_id):
 if __name__ == "__main__":
     init_db()
     print("=" * 55)
-    print("  Telematics Backend — Module 4 (Sri Janani)")
+    print("  Telematics Backend - Module 4 (Sri Janani)")
     print(f"  Database : {DB_CONFIG['host']} / {DB_CONFIG['database']}")
-    print(f"  Route    : Office → Porur → Koyambedu → Anna Nagar → Mogappair")
+    print(f"  Route    : Office -> Porur -> Koyambedu -> Anna Nagar -> Mogappair")
     print("=" * 55)
     print(f"  Dashboard: http://0.0.0.0:5000/")
     print(f"  Health   : http://0.0.0.0:5000/health")

@@ -251,14 +251,11 @@ function buildTrips(date) {
   const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const dn = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const sec = document.getElementById('tripsSection');
-  const label = `${dn[date.getDay()]}, ${date.getDate()} ${mn[date.getMonth()]} ${date.getFullYear()}`;
+  const dow = date.getDay(); // 0=Sun
+  const label = `${dn[dow]}, ${date.getDate()} ${mn[date.getMonth()]} ${date.getFullYear()}`;
 
-  // Only include buses that have actually sent real data
-  const liveBuses = Object.keys(sim).filter(id => sim[id].lastUpdate > 0);
-  const amBuses   = liveBuses.filter(id => BMETA[id]?.trip === '8am');
-  const pmBuses   = liveBuses.filter(id => BMETA[id]?.trip === '3pm');
-  const otherBuses = liveBuses.filter(id => !BMETA[id]);
-  const sosId     = liveBuses.find(id => sim[id].sos);
+  const liveBuses  = Object.keys(sim).filter(id => sim[id].lastUpdate > 0);
+  const sosId      = liveBuses.find(id => sim[id].sos);
 
   const sosBanner = sosId ? `<div class="sos-home-banner">
     <div class="sos-home-banner-icon">🚨</div>
@@ -272,50 +269,82 @@ function buildTrips(date) {
   const offlineBanner = !backendOnline ? `<div class="sos-home-banner" style="border-color:#6b7280;background:#1a1f2e">
     <div class="sos-home-banner-icon">📡</div>
     <div class="sos-home-banner-text">
-      <div class="sos-home-banner-title" style="color:#9ca3af">Backend offline</div>
-      <div class="sos-home-banner-sub" style="color:#6b7280">Waiting for connection to ${BACKEND}</div>
+      <div class="sos-home-banner-title" style="color:#9ca3af">Backend offline — showing schedule</div>
+      <div class="sos-home-banner-sub" style="color:#6b7280">Live GPS will appear once backend connects to ${BACKEND}</div>
     </div>
   </div>` : '';
 
-  if (!backendOnline || liveBuses.length === 0) {
-    sec.innerHTML = `${offlineBanner}
-      <div class="trips-title" style="margin-top:${!backendOnline?'16px':'0'}">${label} — Waiting for GPS Data</div>
-      <div class="weekend-box"><div class="wb-icon">📡</div><p>No bus data received yet. Start the backend and connect your ESP32 device.</p></div>`;
+  // Sunday = holiday leave
+  if (dow === 0) {
+    sec.innerHTML = `${sosBanner}${offlineBanner}
+      <div class="trips-title" style="margin-top:8px">${label}</div>
+      <div class="weekend-box">
+        <div class="wb-icon">🌴</div>
+        <div style="font-size:1.05rem;font-weight:700;color:#f97316;margin-bottom:4px">Sunday Leave</div>
+        <p>No bus service today. All routes resume Monday 8:00 AM.</p>
+      </div>`;
     return;
   }
 
-  const amSection = amBuses.length ? `
+  // Mon–Sat: always show full schedule from BMETA, enrich with live data if available
+  const allAmIds = Object.keys(BMETA).filter(id => BMETA[id].trip === '8am');
+  const allPmIds = Object.keys(BMETA).filter(id => BMETA[id].trip === '3pm');
+
+  function scheduleStrip(id) {
+    const m   = BMETA[id];
+    const b   = sim[id];
+    const clr = STRIP_COLORS[id] || 'red';
+    const hasData = b && b.lastUpdate > 0;
+    const spdPct  = hasData ? spct(b.speed) : 0;
+    const spdTxt  = b && b.sos ? '🚨 SOS' : hasData ? (b.speed + ' km/h') : 'Scheduled';
+    const spdClass = (b && b.speed > 70) ? 'fast' : (b && b.speed > 40) ? 'mid' : '';
+    return `<div class="tc-strip" id="hs-${id}">
+      <div class="tc-strip-label">${m.num}</div>
+      <div class="tc-strip-wrap">
+        <div class="tc-strip-track"></div>
+        <div class="tc-strip-fill ${clr}" id="hsfill-${id}" style="width:${spdPct}%"></div>
+        <div class="tc-strip-bus" id="hsbus-${id}" style="left:${Math.min(93,spdPct)}%">🚌</div>
+      </div>
+      <div class="tc-strip-spd ${spdClass}" id="hsspd-${id}">${spdTxt}</div>
+    </div>`;
+  }
+
+  const liveChip = backendOnline ? '<div class="tc-chip">📍 Live GPS</div>' : '<div class="tc-chip" style="color:#9ca3af">📅 Scheduled</div>';
+
+  const amSection = `
     <div class="trip-card morning">
       <div class="trip-card-bar"></div>
       <div class="trip-card-body">
         <div class="tc-top"><div class="tc-icon">🌅</div><span class="tc-badge badge-am">8:00 AM</span></div>
         <div class="tc-title">Morning to College</div>
-        <div class="tc-time">${amBuses.length} bus${amBuses.length>1?'es':''} · Live GPS</div>
+        <div class="tc-time">${allAmIds.length} buses · ${backendOnline ? 'Live GPS' : 'Scheduled'}</div>
         <div class="tc-meta">
-          <div class="tc-chip">🚌 <b>${amBuses.length}</b> Bus${amBuses.length>1?'es':''}</div>
-          <div class="tc-chip">📍 Live GPS</div>
+          <div class="tc-chip">🚌 <b>${allAmIds.length}</b> Buses</div>
+          ${liveChip}
         </div>
-        <div class="tc-strips">${amBuses.map(stripHtml).join('')}</div>
+        <div class="tc-strips">${allAmIds.map(scheduleStrip).join('')}</div>
         <button class="tc-btn am-btn" onclick="showBusList('8am','Morning to College — 8:00 AM')">View All &amp; Track →</button>
       </div>
-    </div>` : '';
+    </div>`;
 
-  const pmSection = pmBuses.length ? `
+  const pmSection = `
     <div class="trip-card return">
       <div class="trip-card-bar"></div>
       <div class="trip-card-body">
         <div class="tc-top"><div class="tc-icon">🌆</div><span class="tc-badge badge-pm">3:00 PM</span></div>
-        <div class="tc-title">Return from College</div>
-        <div class="tc-time">${pmBuses.length} bus${pmBuses.length>1?'es':''} · Live GPS</div>
+        <div class="tc-title">Evening Return</div>
+        <div class="tc-time">${allPmIds.length} buses · ${backendOnline ? 'Live GPS' : 'Scheduled'}</div>
         <div class="tc-meta">
-          <div class="tc-chip">🚌 <b>${pmBuses.length}</b> Bus${pmBuses.length>1?'es':''}</div>
-          <div class="tc-chip">📍 Live GPS</div>
+          <div class="tc-chip">🚌 <b>${allPmIds.length}</b> Buses</div>
+          ${liveChip}
         </div>
-        <div class="tc-strips">${pmBuses.map(stripHtml).join('')}</div>
-        <button class="tc-btn pm-btn" onclick="showBusList('3pm','Return from College — 3:00 PM')">View All &amp; Track →</button>
+        <div class="tc-strips">${allPmIds.map(scheduleStrip).join('')}</div>
+        <button class="tc-btn pm-btn" onclick="showBusList('3pm','Evening Return — 3:00 PM')">View All &amp; Track →</button>
       </div>
-    </div>` : '';
+    </div>`;
 
+  // Extra hardware devices not in BMETA
+  const otherBuses = liveBuses.filter(id => !BMETA[id]);
   const otherSection = otherBuses.length ? `
     <div class="trip-card morning" style="grid-column:1/-1">
       <div class="trip-card-bar"></div>
@@ -323,20 +352,20 @@ function buildTrips(date) {
         <div class="tc-top"><div class="tc-icon">📡</div><span class="tc-badge badge-am">Live</span></div>
         <div class="tc-title">Live Devices</div>
         <div class="tc-time">${otherBuses.length} device${otherBuses.length>1?'s':''} · Real GPS</div>
-        <div class="tc-strips">${otherBuses.map(stripHtml).join('')}</div>
+        <div class="tc-strips">${otherBuses.map(id => stripHtml(id)).join('')}</div>
         <button class="tc-btn am-btn" onclick="showBusList('all','All Live Devices')">View All &amp; Track →</button>
       </div>
     </div>` : '';
 
   sec.innerHTML = `
-    ${sosBanner}
-    <div class="trips-title" style="margin-top:${sosId?'16px':'0'}">${label} — Live Fleet</div>
+    ${sosBanner}${offlineBanner}
+    <div class="trips-title" style="margin-top:8px">${label} — ${backendOnline ? 'Live Fleet' : 'Bus Schedule'}</div>
     <div class="trips-grid">${amSection}${pmSection}${otherSection}</div>`;
 }
 
 function updateHomeStrips() {
   if (!document.getElementById('homeView').classList.contains('active')) return;
-  Object.keys(sim).filter(id => sim[id].lastUpdate > 0).forEach(id => {
+  Object.keys(BMETA).forEach(id => {
     const b = sim[id];
     const hasData = b && b.lastUpdate > 0;
     const spdPct = hasData ? spct(b.speed) : 0;
@@ -346,8 +375,9 @@ function updateHomeStrips() {
     if (!fillEl || !busEl || !spdEl) return;
     fillEl.style.width = spdPct + '%';
     busEl.style.left   = Math.min(93, spdPct) + '%';
-    const spdClass = b.speed > 70 ? 'fast' : b.speed > 40 ? 'mid' : '';
-    spdEl.textContent = b.sos ? '🚨 SOS' : hasData ? (b.speed + ' km/h') : 'No signal';
+    const spd = hasData ? b.speed : 0;
+    const spdClass = spd > 70 ? 'fast' : spd > 40 ? 'mid' : '';
+    spdEl.textContent = (b && b.sos) ? '🚨 SOS' : hasData ? (spd + ' km/h') : 'Scheduled';
     spdEl.className = 'tc-strip-spd ' + spdClass;
   });
 }
