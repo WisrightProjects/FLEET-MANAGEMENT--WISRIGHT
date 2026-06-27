@@ -524,7 +524,20 @@ function openTracker(id) {
     if (!lmarker) lmarker = L.marker(center, {icon: busIcon(m.color, !!(b && b.sos))}).addTo(lmap);
     lmap.flyTo(center, hasData ? 15 : 12, {animate: true, duration: 1.2});
     updateTele(id);
-    tickId = setInterval(() => updateTele(id), 3000);
+    // Check for existing active trip on this device
+    currentTripId = null;
+    _updateTripPanelEmpty();
+    fetchActiveTrip(id).then(trip => {
+      const btn = document.getElementById('tripActionBtn');
+      if (trip && trip.status === 'active') {
+        currentTripId = trip.id;
+        if (btn) { btn.textContent = '⏹ End Trip'; btn.classList.add('trip-active'); }
+      } else {
+        if (btn) { btn.textContent = '▶ Start Trip'; btn.classList.remove('trip-active'); }
+      }
+      updateTripPanel(id);
+    });
+    tickId = setInterval(() => { updateTele(id); updateTripPanel(id); }, 3000);
   }, 80);
 }
 
@@ -532,6 +545,10 @@ function leaveTracker() {
   if (tickId) { clearInterval(tickId); tickId = null; }
   if (lmarker) { lmarker.remove(); lmarker = null; }
   if (ltrail)  { ltrail.setLatLngs([]); }
+  // Reset trip UI — trip stays active on backend, just hidden
+  currentTripId = null;
+  const btn = document.getElementById('tripActionBtn');
+  if (btn) { btn.textContent = '▶ Start Trip'; btn.classList.remove('trip-active'); }
   location.hash = '';
   showV('busListView');
 }
@@ -686,5 +703,355 @@ function updateTele(id) {
 ═══════════════════════════════ */
 window.addEventListener('load', () => {
   const hash = location.hash.slice(1);
-  if (hash) openTracker(hash); // works for any device ID, sim[hash] guard is inside updateTele
+  if (hash) openTracker(hash);
 });
+
+/* ═══════════════════════════════════════════════════════════
+   TRIP MANAGEMENT
+   Start / End trips, accumulate km, detect off-route, record
+   mandatory stop arrivals/departures and dwell times.
+═══════════════════════════════════════════════════════════ */
+
+let currentTripId   = null;
+let _routeStopsCache = null;
+
+async function tripAction() {
+  if (!curBus) return;
+  const btn = document.getElementById('tripActionBtn');
+  if (currentTripId) {
+    if (!confirm(`End trip for ${BMETA[curBus]?.num || curBus}?`)) return;
+    try {
+      const r = await fetch(`${BACKEND}/trip/end`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({dev_id: curBus}),
+      });
+      const d = await r.json();
+      if (d.status === 'ok') {
+        const finishedId = currentTripId;
+        currentTripId = null;
+        if (btn) { btn.textContent = '▶ Start Trip'; btn.classList.remove('trip-active'); }
+        _updateTripPanelEmpty();
+        if (confirm('Trip ended! View full summary?')) showTripSummary(finishedId);
+      }
+    } catch { alert('Failed to end trip — check backend connection.'); }
+  } else {
+    try {
+      const r = await fetch(`${BACKEND}/trip/start`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({dev_id: curBus, route_key: 'office_to_mogappair'}),
+      });
+      const d = await r.json();
+      if (d.status === 'ok') {
+        currentTripId = d.trip_id;
+        if (btn) { btn.textContent = '⏹ End Trip'; btn.classList.add('trip-active'); }
+        updateTripPanel(curBus);
+      }
+    } catch { alert('Failed to start trip — check backend connection.'); }
+  }
+}
+
+async function fetchActiveTrip(devId) {
+  try {
+    const r = await fetch(`${BACKEND}/trip/active/${devId}`, {signal: AbortSignal.timeout(2500)});
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.data ? {...d.data, stops_visited: d.stops_visited || []} : null;
+  } catch { return null; }
+}
+
+async function fetchRouteStops() {
+  if (_routeStopsCache) return _routeStopsCache;
+  try {
+    const r = await fetch(`${BACKEND}/routes`, {signal: AbortSignal.timeout(2000)});
+    if (!r.ok) return [];
+    const d = await r.json();
+    const route = (d.data || []).find(x => x.key === 'office_to_mogappair');
+    _routeStopsCache = route ? route.stops : [];
+    return _routeStopsCache;
+  } catch { return []; }
+}
+
+function fmtDuration(sec) {
+  sec = Math.round(+sec || 0);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m >= 60 ? `${Math.floor(m/60)}h ${m%60}m` : `${m}m ${s}s`;
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return new Date((+ts) * 1000).toLocaleTimeString('en-IN',
+    {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+function _updateTripPanelEmpty() {
+  const panel = document.getElementById('tripPanel');
+  if (panel) panel.style.display = 'none';
+  const presEl = document.getElementById('presencePanelContent');
+  if (presEl) presEl.innerHTML =
+    '<div style="font-size:.73rem;color:#8b949e">Start a trip to enable passenger tracking.</div>';
+}
+
+async function updateTripPanel(id) {
+  if (!id) return;
+  const trip = await fetchActiveTrip(id);
+  const panel = document.getElementById('tripPanel');
+  const content = document.getElementById('tripPanelContent');
+  const presEl  = document.getElementById('presencePanelContent');
+  if (!panel || !content) return;
+
+  if (!trip || trip.status !== 'active') {
+    panel.style.display = 'none';
+    _updateTripPanelEmpty();
+    return;
+  }
+
+  // Sync button state (e.g. after opening tracker for a device with existing trip)
+  currentTripId = trip.id;
+  const btn = document.getElementById('tripActionBtn');
+  if (btn && !btn.classList.contains('trip-active')) {
+    btn.textContent = '⏹ End Trip'; btn.classList.add('trip-active');
+  }
+
+  panel.style.display = '';
+
+  const elapsed  = Math.floor(Date.now() / 1000 - trip.start_time);
+  const elStr    = fmtDuration(elapsed);
+  const allStops = await fetchRouteStops();
+  const visited  = new Set((trip.stops_visited || []).map(s => s.stop_name));
+
+  const stopsHtml = allStops.map(s => {
+    const done   = visited.has(s.name);
+    const detail = (trip.stops_visited || []).find(v => v.stop_name === s.name);
+    const extra  = detail?.dwell_sec != null
+      ? `<span class="sp-dwell">${fmtDuration(detail.dwell_sec)} dwell</span>`
+      : (detail ? '<span class="sp-here">● Here now</span>' : '');
+    return `<div class="sp-row${done ? ' sp-done' : ''}">
+      <span class="sp-dot${done ? ' done' : ''}"></span>
+      <span class="sp-nm">${s.name}</span>${extra}</div>`;
+  }).join('');
+
+  content.innerHTML = `
+    <div class="trip-metrics">
+      <div class="tm"><div class="tm-v">${(+trip.total_km||0).toFixed(2)}</div><div class="tm-l">km</div></div>
+      <div class="tm"><div class="tm-v">${elStr}</div><div class="tm-l">elapsed</div></div>
+      <div class="tm"><div class="tm-v">${trip.passengers_onboard||0}</div><div class="tm-l">onboard</div></div>
+      <div class="tm"><div class="tm-v${trip.off_route_count>0?' warn':''}"> ${trip.off_route_count}</div><div class="tm-l">off-route</div></div>
+    </div>
+    <div class="stop-progress">${stopsHtml}</div>
+    <div class="trip-start-note">Started ${fmtTime(trip.start_time)} · Route: ${trip.route_name}</div>`;
+
+  // Presence controls
+  if (presEl) {
+    const curStop = sim[id]?.geo?.name || '';
+    presEl.innerHTML = `
+      <div class="pax-row">
+        <span class="pax-icon">🧍</span>
+        <span class="pax-count"><b id="paxCount">${trip.passengers_onboard||0}</b> onboard</span>
+      </div>
+      <div class="pres-ctrls">
+        <input id="presCount" type="number" min="1" max="50" value="1" class="pres-num"/>
+        <button class="pres-btn board" onclick="logPresence('board')">🟢 Board</button>
+        <button class="pres-btn alight" onclick="logPresence('alight')">🔴 Alight</button>
+      </div>
+      ${curStop ? `<div class="pres-stop">At: ${curStop}</div>` : ''}`;
+  }
+}
+
+async function logPresence(type) {
+  if (!curBus || !currentTripId) return;
+  const count     = Math.max(1, parseInt(document.getElementById('presCount')?.value || '1', 10));
+  const stopName  = sim[curBus]?.geo?.name || '';
+  try {
+    const r = await fetch(`${BACKEND}/presence`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({dev_id: curBus, event_type: type, count, stop_name: stopName}),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      const el = document.getElementById('paxCount');
+      if (el) el.textContent = d.passengers_onboard;
+    }
+  } catch {}
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TRIP LOG VIEW (View 4)
+═══════════════════════════════════════════════════════════ */
+
+async function showTripLog() {
+  showV('tripLogView');
+  const sub     = document.getElementById('tripLogSub');
+  const content = document.getElementById('tripLogContent');
+  if (sub) sub.textContent = 'Route history & passenger data';
+  content.innerHTML = '<div style="color:#8b949e;padding:24px;font-size:.82rem">Loading trips…</div>';
+
+  try {
+    const devId = curBus;
+    const url   = devId
+      ? `${BACKEND}/trips?dev_id=${devId}&limit=30`
+      : `${BACKEND}/trips?limit=30`;
+    const r = await fetch(url, {signal: AbortSignal.timeout(4000)});
+    const d = await r.json();
+    const trips = d.data || [];
+
+    if (!trips.length) {
+      content.innerHTML = `<div class="tlog-empty">
+        <div style="font-size:2rem;margin-bottom:10px">🗺</div>
+        <div>No trips recorded yet.</div>
+        <div style="color:#6b7280;font-size:.75rem;margin-top:6px">Open the tracker and tap "▶ Start Trip" to begin.</div>
+      </div>`;
+      return;
+    }
+
+    content.innerHTML = trips.map(t => {
+      const dur    = t.end_time ? fmtDuration(t.end_time - t.start_time) : 'Active';
+      const isActive = t.status === 'active';
+      const badge  = isActive
+        ? '<span class="tlog-badge active">● Active</span>'
+        : '<span class="tlog-badge done">✓ Done</span>';
+      const offBadge = t.off_route_count > 0
+        ? `<span class="tlog-badge offroute">⚠ ${t.off_route_count} off-route</span>`
+        : '';
+      return `<div class="tlog-row" onclick="showTripSummary(${t.id})">
+        <div class="tlog-left">
+          <div class="tlog-route">${t.route_name}</div>
+          <div class="tlog-meta">
+            ${new Date(t.start_time*1000).toLocaleString('en-IN')}
+            &nbsp;·&nbsp; ${dur}
+            &nbsp;·&nbsp; ${(+t.total_km||0).toFixed(2)} km
+          </div>
+          <div class="tlog-badges">${badge}${offBadge}</div>
+        </div>
+        <div class="tlog-chev">›</div>
+      </div>`;
+    }).join('');
+  } catch {
+    content.innerHTML = '<div style="color:#f85149;padding:20px;font-size:.82rem">Failed to load trips. Is the backend running?</div>';
+  }
+}
+
+async function showTripSummary(tripId) {
+  showV('tripLogView');
+  const sub     = document.getElementById('tripLogSub');
+  const content = document.getElementById('tripLogContent');
+  if (sub) sub.textContent = `Trip #${tripId} — Full Summary`;
+  content.innerHTML = '<div style="color:#8b949e;padding:24px;font-size:.82rem">Loading summary…</div>';
+
+  try {
+    const r = await fetch(`${BACKEND}/trip/summary/${tripId}`, {signal: AbortSignal.timeout(4000)});
+    const d = await r.json();
+    if (d.status !== 'ok') { content.innerHTML = '<div style="color:#f85149;padding:20px">Trip not found.</div>'; return; }
+    _renderTripSummary(d.data, content);
+  } catch {
+    content.innerHTML = '<div style="color:#f85149;padding:20px;font-size:.82rem">Failed to load summary.</div>';
+  }
+}
+
+function _renderTripSummary(data, el) {
+  const {trip, stops, presence, off_route} = data;
+  const dur      = trip.end_time ? fmtDuration(trip.end_time - trip.start_time) : 'Ongoing';
+  const totalPax = presence.filter(p => p.event_type === 'board').reduce((s, p) => s + (+p.count||0), 0);
+
+  // Build per-stop passenger aggregates
+  const paxByStop = {};
+  presence.forEach(p => {
+    if (!p.stop_name) return;
+    if (!paxByStop[p.stop_name]) paxByStop[p.stop_name] = {board:0, alight:0};
+    if (p.event_type === 'board') paxByStop[p.stop_name].board  += +p.count||0;
+    else                          paxByStop[p.stop_name].alight += +p.count||0;
+  });
+
+  const stopRows = stops.length
+    ? stops.map((s, i) => {
+        const pax = paxByStop[s.stop_name] || {board:0, alight:0};
+        return `<tr>
+          <td>${i+1}</td>
+          <td><b>${s.stop_name}</b></td>
+          <td>${fmtTime(s.arrived_at)}</td>
+          <td>${s.departed_at ? fmtTime(s.departed_at) : '<span style="color:#3fb950">Here now</span>'}</td>
+          <td>${s.dwell_sec != null ? fmtDuration(s.dwell_sec) : '—'}</td>
+          <td>${s.distance_from_prev > 0 ? (+s.distance_from_prev).toFixed(2)+' km' : '—'}</td>
+          <td>${s.time_from_prev > 0 ? fmtDuration(s.time_from_prev) : '—'}</td>
+          <td style="color:#3fb950;font-weight:700">+${pax.board}</td>
+          <td style="color:#f85149;font-weight:700">−${pax.alight}</td>
+          <td><b>${+s.passengers_onboard||0}</b></td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="10" style="color:#8b949e;text-align:center;padding:16px">No mandatory stops recorded.</td></tr>';
+
+  const offRows = off_route.slice(0, 20).map(e =>
+    `<tr>
+      <td>${fmtTime(e.timestamp)}</td>
+      <td>${(+e.lat).toFixed(5)}</td>
+      <td>${(+e.lon).toFixed(5)}</td>
+      <td style="color:#f85149;font-weight:700">${(+e.distance_from_route||0).toFixed(0)} m</td>
+    </tr>`).join('');
+
+  const presRows = presence.map(p =>
+    `<tr>
+      <td>${fmtTime(p.timestamp)}</td>
+      <td style="color:${p.event_type==='board'?'#3fb950':'#f85149'};font-weight:700">
+        ${p.event_type==='board'?'🟢 Board':'🔴 Alight'}</td>
+      <td>${p.count}</td>
+      <td>${p.stop_name||'—'}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <button class="back-to-list" onclick="showTripLog()">← All Trips</button>
+
+    <div class="sum-hero">
+      <div class="sh"><div class="sh-v">${(+trip.total_km||0).toFixed(2)}</div><div class="sh-l">Total km</div></div>
+      <div class="sh"><div class="sh-v">${dur}</div><div class="sh-l">Duration</div></div>
+      <div class="sh"><div class="sh-v">${totalPax}</div><div class="sh-l">Total Pax</div></div>
+      <div class="sh"><div class="sh-v${trip.off_route_count>0?' warn':''}">${trip.off_route_count}</div><div class="sh-l">Off-Route</div></div>
+    </div>
+
+    <div class="sum-meta">
+      <div><b>Route:</b> ${trip.route_name}</div>
+      <div><b>Start:</b> ${new Date(trip.start_time*1000).toLocaleString('en-IN')}</div>
+      <div><b>End:</b> ${trip.end_time ? new Date(trip.end_time*1000).toLocaleString('en-IN') : '—'}</div>
+      <div><b>Device:</b> ${trip.dev_id}</div>
+      <div><b>Status:</b> <span style="color:${trip.status==='active'?'#3fb950':'#8b949e'}">${trip.status}</span></div>
+    </div>
+
+    <div class="sum-title">📍 Mandatory Stop Log</div>
+    <div class="tbl-wrap" style="margin:0 0 16px">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Stop</th><th>Arrived</th><th>Departed</th>
+          <th>Dwell</th><th>Distance</th><th>Travel Time</th>
+          <th>Boarded</th><th>Alighted</th><th>Onboard</th>
+        </tr></thead>
+        <tbody>${stopRows}</tbody>
+      </table>
+    </div>
+
+    ${off_route.length ? `
+    <div class="sum-title" style="color:#f85149">⚠ Off-Route Events (${off_route.length})</div>
+    <div class="tbl-wrap" style="margin:0 0 16px">
+      <table>
+        <thead><tr><th>Time</th><th>Lat</th><th>Lon</th><th>Distance from Route</th></tr></thead>
+        <tbody>${offRows}</tbody>
+      </table>
+    </div>` : ''}
+
+    ${presence.length ? `
+    <div class="sum-title">👥 Passenger Event Log</div>
+    <div class="tbl-wrap" style="margin:0 0 16px">
+      <table>
+        <thead><tr><th>Time</th><th>Type</th><th>Count</th><th>Stop</th></tr></thead>
+        <tbody>${presRows}</tbody>
+      </table>
+    </div>` : ''}`;
+}
+
+function leaveTripLog() {
+  const sub = document.getElementById('tripLogSub');
+  if (sub) sub.textContent = 'Route history & passenger data';
+  if (curBus) showV('trackerView');
+  else goHome();
+}

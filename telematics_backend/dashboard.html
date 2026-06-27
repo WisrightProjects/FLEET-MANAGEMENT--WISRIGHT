@@ -102,6 +102,8 @@
       <div class="trk-sub"  id="trkSub">—</div>
     </div>
     <div class="live-pill"><span class="pdot"></span> LIVE</div>
+    <button id="tripActionBtn" class="trip-start-btn" onclick="tripAction()">▶ Start Trip</button>
+    <button class="trips-log-btn" onclick="showTripLog()">📋 Trips</button>
     <button class="share-btn" onclick="shareTracker()" title="Copy link to this bus">🔗 Share</button>
   </div>
 
@@ -180,8 +182,39 @@
         <div id="tLog"><div style="font-size:.73rem;color:#8b949e">No events yet…</div></div>
       </div>
 
+      <!-- Active Trip Panel -->
+      <div class="ts" id="tripPanel" style="display:none">
+        <div class="ttag">🗺 Active Trip</div>
+        <div id="tripPanelContent"></div>
+      </div>
+
+      <!-- Passenger Presence Panel -->
+      <div class="ts" id="presenceSection">
+        <div class="ttag">👥 Passenger Monitoring</div>
+        <div id="presencePanelContent">
+          <div style="font-size:.73rem;color:#8b949e">Start a trip to enable passenger tracking.</div>
+        </div>
+      </div>
+
     </div>
   </div>
+</div>
+
+
+<!-- ══════════════════════════════════
+     VIEW 4 — TRIP LOG
+══════════════════════════════════ -->
+<div id="tripLogView" class="view">
+  <div class="list-hdr">
+    <button class="back-btn" onclick="leaveTripLog()">← Back</button>
+    <div>
+      <div class="list-hdr-title">Trip Log</div>
+      <div class="list-hdr-sub" id="tripLogSub">Route history &amp; passenger data</div>
+    </div>
+    <button class="trip-refresh-btn" onclick="showTripLog()">🔄 Refresh</button>
+  </div>
+  <div id="tripLogContent" style="padding:16px 14px"></div>
+  <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Trip Tracking System</div>
 </div>
 
 <script src="/dashboard.js" defer></script>

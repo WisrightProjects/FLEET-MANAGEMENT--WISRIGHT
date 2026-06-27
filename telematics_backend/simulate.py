@@ -88,6 +88,24 @@ START_OFFSET = {
 def interp(a, b, t):
     return a + (b - a) * t
 
+
+def post_presence(dev_id, event_type, count, stop_name):
+    """Simulate passenger boarding/alighting at a stop."""
+    payload = json.dumps({
+        "dev_id": dev_id, "event_type": event_type,
+        "count": count, "stop_name": stop_name,
+    }).encode()
+    req = urllib.request.Request(
+        f"{BACKEND}/presence", data=payload,
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status
+    except urllib.error.URLError:
+        return None
+
+
 def post(dev_id, lat, lon, speed, sos):
     payload = json.dumps({
         "dev_id": dev_id,
@@ -139,6 +157,16 @@ def run_bus(dev_id):
         # --- DWELL at current stop ---
         dwell_secs = random.randint(DWELL_MIN, DWELL_MAX)
         dwell_packets = max(1, dwell_secs // INTERVAL)
+        # Simulate passengers boarding/alighting once per stop arrival
+        stop_name_clean = src_key.replace("_", " ").title()
+        board_count  = random.randint(1, 8)
+        alight_count = random.randint(0, 4)
+        post_presence(dev_id, "board",  board_count,  stop_name_clean)
+        if alight_count > 0:
+            post_presence(dev_id, "alight", alight_count, stop_name_clean)
+        with _lock:
+            print(f"  [{dev_id}] 👥 {stop_name_clean}: +{board_count} board, -{alight_count} alight")
+
         for _ in range(dwell_packets):
             pkt += 1
             now = time.time()
