@@ -546,15 +546,28 @@ function openTracker(id) {
   location.hash = id;
   showV('trackerView');
 
-  setTimeout(() => {
-    ensureMap(); lmap.invalidateSize();
+  // Two rAF cycles guarantee the browser has finished layout before Leaflet
+  // measures the container — prevents tile offset / wrong-position bug
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    ensureMap();
+    lmap.invalidateSize({ pan: false });
+
     const b = sim[id];
     const hasData = b && b.lastUpdate > 0 && b.lat !== null;
     const center  = hasData ? [b.lat, b.lon] : [13.05, 80.22];
-    if (!lmarker) lmarker = L.marker(center, {icon: busIcon(m.color, !!(b && b.sos))}).addTo(lmap);
-    lmap.flyTo(center, hasData ? 15 : 12, {animate: true, duration: 1.2});
+    const zoom    = hasData ? 16 : 12;
+
+    if (!lmarker) {
+      lmarker = L.marker(center, {icon: busIcon(m.color, !!(b && b.sos))}).addTo(lmap);
+    } else {
+      lmarker.setLatLng(center);
+    }
+    lmap.setView(center, zoom, { animate: false });
+
+    // Second invalidate after setView so tiles snap to correct positions
+    lmap.invalidateSize({ pan: false });
+
     updateTele(id);
-    // Check for existing active trip on this device
     currentTripId = null;
     _updateTripPanelEmpty();
     fetchActiveTrip(id).then(trip => {
@@ -568,7 +581,7 @@ function openTracker(id) {
       updateTripPanel(id);
     });
     tickId = setInterval(() => { updateTele(id); updateTripPanel(id); }, 3000);
-  }, 80);
+  }));
 }
 
 function leaveTracker() {
@@ -613,7 +626,10 @@ function updateTele(id) {
     }
     lmarker.bindPopup(`<b>${m.num}</b><br>Speed: <b>${b.speed} km/h</b><br>${b.geo ? 'At: ' + b.geo.name : 'En route'}`);
     if (ltrail) { ltrail.setLatLngs(b.trail); ltrail.setStyle({color: m.color}); }
-    lmap.panTo([b.lat, b.lon], {animate: true, duration: .5});
+    // Only pan if marker is outside the centre 60% of the visible map area
+    if (lmap && !lmap.getBounds().pad(-0.2).contains([b.lat, b.lon])) {
+      lmap.panTo([b.lat, b.lon], {animate: true, duration: 0.5});
+    }
   }
 
   // HUD — US-28: red + OVERSPEED label when >70
