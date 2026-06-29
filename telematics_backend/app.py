@@ -148,20 +148,60 @@ _ngrok_url: str = ""
 
 
 def _start_ngrok(port: int = 5000) -> str:
+    """Create a public HTTPS tunnel via localhost.run using Windows built-in SSH.
+    No binary download required — works on any Windows 10/11 machine.
+    The public URL (https://xxx.lhr.life) is parsed from the SSH output.
+    NGROK_AUTHTOKEN in .env is still used as the enable/disable flag.
+    """
     if not NGROK_TOKEN:
         return ""
-    try:
-        from pyngrok import ngrok, conf
-        conf.get_default().auth_token = NGROK_TOKEN
-        tunnel = ngrok.connect(port, "http")
-        url = tunnel.public_url
-        # Prefer https
-        if url.startswith("http://"):
-            url = "https://" + url[7:]
-        return url
-    except Exception as e:
-        print(f"  [ngrok] Could not start tunnel: {e}")
+    import subprocess, re, shutil
+
+    ssh_exe = shutil.which("ssh") or r"C:\Windows\System32\OpenSSH\ssh.exe"
+    if not os.path.isfile(ssh_exe):
+        print("  [tunnel] SSH not found — cannot create public tunnel")
         return ""
+
+    # Kill any previous tunnel SSH process
+    subprocess.run(["taskkill", "/f", "/im", "ssh.exe"], capture_output=True)
+    time.sleep(1)
+
+    print("  [tunnel] Starting localhost.run SSH tunnel...")
+    try:
+        proc = subprocess.Popen(
+            [
+                ssh_exe,
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "ServerAliveInterval=30",
+                "-o", "ExitOnForwardFailure=yes",
+                "-R", f"80:localhost:{port}",
+                "nokey@localhost.run",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except Exception as e:
+        print(f"  [tunnel] SSH launch failed: {e}")
+        return ""
+
+    # localhost.run prints the URL within ~5 s
+    url_pattern = re.compile(r"https://[a-zA-Z0-9\-]+\.lhr\.life")
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        line = proc.stdout.readline()
+        if not line:
+            time.sleep(0.3)
+            continue
+        print(f"  [tunnel] {line.rstrip()}")
+        m = url_pattern.search(line)
+        if m:
+            url = m.group(0)
+            print(f"  [tunnel] Public URL: {url}")
+            return url
+
+    print("  [tunnel] Could not get URL from localhost.run within 20 s")
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -622,17 +662,9 @@ def post_telemetry():
 
     ts = time.time()
     execute(
-        "INSERT INTO telemetry "
-        "(dev_id, lat, lon, speed_kmh, sos_active, timestamp, "
-        " altitude, satellites, hdop, gps_date, gps_time) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        (dev_id, data["lat"], data["lon"], data["speed_kmh"],
-         data["sos_active"], ts,
-         data.get("altitude"),
-         data.get("satellites"),
-         data.get("hdop"),
-         data.get("gps_date"),
-         data.get("gps_time")),
+        "INSERT INTO telemetry (dev_id, lat, lon, speed_kmh, sos_active, timestamp) "
+        "VALUES (%s,%s,%s,%s,%s,%s)",
+        (dev_id, data["lat"], data["lon"], data["speed_kmh"], data["sos_active"], ts),
     )
     run_geofence(dev_id, data["lat"], data["lon"], ts)
     _update_trip_tracking(dev_id, data["lat"], data["lon"], ts)
@@ -1028,22 +1060,17 @@ if __name__ == "__main__":
     print("=" * 60)
     if _ngrok_url:
         host = _ngrok_url.replace("https://", "").replace("http://", "").rstrip("/")
-        print("=" * 60)
+        print("")
+        print("  " + "=" * 56)
         print("  >>> COPY THIS INTO bus_final.ino <<<")
-        print(f"  #define NGROK_HOST  \"{host}\"")
-        print("=" * 60)
+        print(f'  #define NGROK_HOST  "{host}"')
+        print("  " + "=" * 56)
         print(f"  Full URL   : {_ngrok_url}")
         print(f"  ESP32 POST : {_ngrok_url}/telemetry")
         print(f"  Auth token : Token: {DEVICE_TOKEN}" if DEVICE_TOKEN else "  Auth disabled")
     else:
         print("  Local only : http://0.0.0.0:5000/")
-        print("  No ngrok — set NGROK_AUTHTOKEN in .env for SIM-card ESP32 access")
-        print("")
-        print("  HOW TO GET NGROK (free, 60 seconds):")
-        print("    1. https://ngrok.com  -> Sign Up Free")
-        print("    2. Dashboard -> copy Your Authtoken")
-        print("    3. Paste into .env:  NGROK_AUTHTOKEN=<token>")
-        print("    4. Restart this server -> NGROK_HOST will be printed here")
+        print("  Set NGROK_AUTHTOKEN in .env for SIM-card ESP32 access")
     print("=" * 60)
     print("  Dashboard  : /")
     print("  Health     : /health")
