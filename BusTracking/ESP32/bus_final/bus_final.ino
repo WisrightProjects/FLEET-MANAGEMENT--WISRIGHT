@@ -56,10 +56,10 @@
 // Example: "a1b2c3d4.ngrok-free.app"
 // HOW TO FIND IT: run  python app.py  and look for the line:
 //   ESP32 endpoint: https://<THIS_PART>.ngrok-free.app/telemetry
-#define NGROK_HOST    "51fbc48f9c3dbd.lhr.life"
+#define NGROK_HOST    "haphazard-lanky-oxidant.ngrok-free.dev"
 
 // Backend route — must match Flask endpoint
-#define SERVER_PATH   " https://unhappily-daffodil-habitual.ngrok-free.dev/telemetry"
+#define SERVER_PATH   "/telemetry"
 
 // Auth token — must match DEVICE_TOKEN in server .env
 #define DEVICE_TOKEN  "fleet-secret-2024"

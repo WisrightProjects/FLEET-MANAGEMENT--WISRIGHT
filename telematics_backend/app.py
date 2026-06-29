@@ -148,60 +148,22 @@ _ngrok_url: str = ""
 
 
 def _start_ngrok(port: int = 5000) -> str:
-    """Create a public HTTPS tunnel via localhost.run using Windows built-in SSH.
-    No binary download required — works on any Windows 10/11 machine.
-    The public URL (https://xxx.lhr.life) is parsed from the SSH output.
-    NGROK_AUTHTOKEN in .env is still used as the enable/disable flag.
+    """Create a stable public HTTPS tunnel using the official ngrok Python SDK.
+    Uses ngrok.forward() — no binary download, no Windows Defender interference.
+    Requires:  pip install ngrok
     """
     if not NGROK_TOKEN:
         return ""
-    import subprocess, re, shutil
-
-    ssh_exe = shutil.which("ssh") or r"C:\Windows\System32\OpenSSH\ssh.exe"
-    if not os.path.isfile(ssh_exe):
-        print("  [tunnel] SSH not found — cannot create public tunnel")
-        return ""
-
-    # Kill any previous tunnel SSH process
-    subprocess.run(["taskkill", "/f", "/im", "ssh.exe"], capture_output=True)
-    time.sleep(1)
-
-    print("  [tunnel] Starting localhost.run SSH tunnel...")
     try:
-        proc = subprocess.Popen(
-            [
-                ssh_exe,
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "ServerAliveInterval=30",
-                "-o", "ExitOnForwardFailure=yes",
-                "-R", f"80:localhost:{port}",
-                "nokey@localhost.run",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        import ngrok as _ngrok
+        listener = _ngrok.forward(port, authtoken=NGROK_TOKEN)
+        url = listener.url()
+        if url and url.startswith("http://"):
+            url = "https://" + url[7:]
+        return url or ""
     except Exception as e:
-        print(f"  [tunnel] SSH launch failed: {e}")
+        print(f"  [ngrok] SDK tunnel failed: {e}")
         return ""
-
-    # localhost.run prints the URL within ~5 s
-    url_pattern = re.compile(r"https://[a-zA-Z0-9\-]+\.lhr\.life")
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        line = proc.stdout.readline()
-        if not line:
-            time.sleep(0.3)
-            continue
-        print(f"  [tunnel] {line.rstrip()}")
-        m = url_pattern.search(line)
-        if m:
-            url = m.group(0)
-            print(f"  [tunnel] Public URL: {url}")
-            return url
-
-    print("  [tunnel] Could not get URL from localhost.run within 20 s")
-    return ""
 
 
 # ---------------------------------------------------------------------------
