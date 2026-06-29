@@ -588,17 +588,23 @@ def validate(data, schema):
 # Static file serving
 # ---------------------------------------------------------------------------
 
+_HERE = os.path.abspath(os.path.dirname(__file__))
+
 @app.route("/")
 def dashboard():
-    return send_from_directory(os.path.dirname(__file__), "dashboard.html")
+    return send_from_directory(_HERE, "dashboard.html")
 
 @app.route("/dashboard.css")
 def dashboard_css():
-    return send_from_directory(os.path.dirname(__file__), "dashboard.css")
+    resp = send_from_directory(_HERE, "dashboard.css")
+    resp.headers["Content-Type"] = "text/css; charset=utf-8"
+    return resp
 
 @app.route("/dashboard.js")
 def dashboard_js_route():
-    return send_from_directory(os.path.dirname(__file__), "dashboard.js")
+    resp = send_from_directory(_HERE, "dashboard.js")
+    resp.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    return resp
 
 
 # ---------------------------------------------------------------------------

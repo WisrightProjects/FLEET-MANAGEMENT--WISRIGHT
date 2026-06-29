@@ -3,10 +3,19 @@
    No simulation. All state comes from /telemetry/all-latest.
 ═══════════════════════════════════════════════════════════════ */
 
-// Auto-detect backend: same host as the page (works for localhost AND LAN IP)
-const BACKEND = window.location.port
-  ? `${window.location.protocol}//${window.location.hostname}:${window.location.port}`
-  : `${window.location.protocol}//${window.location.hostname}`;
+// ── Backend URL configuration ────────────────────────────────────────────────
+// When the page is served through Flask (http://localhost:5000 or ngrok URL),
+// BACKEND is auto-detected from window.location and works for all cases.
+// If you open dashboard.html directly as a file:// you must set BACKEND_OVERRIDE.
+const BACKEND_OVERRIDE = null; // e.g. "https://51fbc48f9c3dbd.lhr.life"
+
+const BACKEND = BACKEND_OVERRIDE || (
+  (window.location.protocol === 'file:')
+    ? 'http://localhost:5000'
+    : window.location.port
+      ? `${window.location.protocol}//${window.location.hostname}:${window.location.port}`
+      : `${window.location.protocol}//${window.location.hostname}`
+);
 let backendOnline = false;
 
 /* ── Bus display metadata — populated dynamically from real device IDs ── */
@@ -1191,10 +1200,11 @@ function bustest_initMap() {
 async function bustest_refresh() {
   _btCountdownTick();
   try {
-    const r = await fetch(`/telemetry/latest?dev_id=${encodeURIComponent(btBusId)}`);
+    const r = await fetch(`${BACKEND}/telemetry/latest?dev_id=${encodeURIComponent(btBusId)}`,
+      { signal: AbortSignal.timeout(2500) });
     if (!r.ok) { bustest_setStatus(false, null); return; }
     const j = await r.json();
-    const d = j.data || j;
+    const d = j.data;
     if (!d || d.lat == null) { bustest_setStatus(false, null); return; }
     bustest_updateUI(d);
     bustest_setStatus(true, d.timestamp || d.ts || null);
