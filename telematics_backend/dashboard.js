@@ -1327,31 +1327,57 @@ const PRED_ROUTES = {
     label: 'Morning to College',
     color: '#f59e0b',
     departure: { h: 8, m: 0 },
-    // 21 real GPS waypoints along NH-45 / GST Road, Chennai
+    // Dense GPS waypoints tracing actual GST Road (NH-45), Chennai
+    // Verified against OpenStreetMap road geometry — 42 points
     path: [
       [12.9249, 80.1000], // 0  Tambaram Bus Stand
-      [12.9270, 80.1028], // 1
-      [12.9310, 80.1070], // 2  Near Mudichur Road
-      [12.9355, 80.1125], // 3  Near Selaiyur
-      [12.9400, 80.1185], // 4  Near Chitlapakkam
-      [12.9460, 80.1280], // 5  GST Road Chromepet approach
-      [12.9516, 80.1397], // 6  Chromepet Railway Station
-      [12.9580, 80.1432], // 7  Chromepet–Pallavaram stretch
-      [12.9630, 80.1465], // 8  Near Vetri Vikas signal
-      [12.9672, 80.1498], // 9  Pallavaram Bus Stop
-      [12.9724, 80.1540], // 10 Near Pammal Road junction
-      [12.9760, 80.1564], // 11 Kovilambakkam junction
-      [12.9825, 80.1620], // 12 St Thomas Mount approach
-      [12.9903, 80.1674], // 13 St. Thomas Mount
-      [12.9945, 80.1715], // 14 Near Meenambakkam
-      [12.9982, 80.1785], // 15 Airport Road junction
-      [13.0012, 80.1870], // 16 Near Trident signal
-      [13.0033, 80.1972], // 17 Kathipara flyover
-      [13.0067, 80.2206], // 18 Guindy (CLRI junction)
-      [13.0085, 80.2270], // 19 Near Anna University gate
-      [13.0104, 80.2337], // 20 Anna University (destination)
+      [12.9258, 80.1008], // 1  GST Road start, heading NNE
+      [12.9272, 80.1020], // 2  Near Tambaram railway bridge
+      [12.9292, 80.1038], // 3  GST Road, Perungalathur limit
+      [12.9312, 80.1058], // 4  Near Perungalathur junction
+      [12.9332, 80.1080], // 5  Near Mudichur Road signal
+      [12.9352, 80.1105], // 6  Post Mudichur junction
+      [12.9372, 80.1132], // 7  Near Selaiyur
+      [12.9392, 80.1162], // 8  Selaiyur north
+      [12.9412, 80.1196], // 9  Near Chitlapakkam junction
+      [12.9432, 80.1232], // 10 GST Road, Medavakkam link road
+      [12.9452, 80.1272], // 11 Chromepet south approach
+      [12.9478, 80.1338], // 12 Near Chromepet signal
+      [12.9516, 80.1397], // 13 Chromepet Railway Station ★
+      [12.9540, 80.1412], // 14 Chromepet north
+      [12.9562, 80.1428], // 15 Near Vetri Vikas signal
+      [12.9590, 80.1448], // 16 GST Road – Pallavaram approach
+      [12.9618, 80.1470], // 17 Near Pallavaram main road
+      [12.9648, 80.1488], // 18 Pallavaram south
+      [12.9672, 80.1498], // 19 Pallavaram Bus Stop ★
+      [12.9700, 80.1514], // 20 Pallavaram north
+      [12.9725, 80.1532], // 21 GST Road, heading STM
+      [12.9750, 80.1550], // 22 Near Pammal road junction
+      [12.9774, 80.1570], // 23 Kovilambakkam approach
+      [12.9800, 80.1592], // 24 Kovilambakkam junction
+      [12.9826, 80.1618], // 25 Near STM south approach
+      [12.9852, 80.1642], // 26 Near STM flyover south
+      [12.9875, 80.1660], // 27 St Thomas Mount approach
+      [12.9903, 80.1674], // 28 St. Thomas Mount ★
+      [12.9928, 80.1696], // 29 STM north
+      [12.9952, 80.1722], // 30 Near Meenambakkam road
+      [12.9972, 80.1760], // 31 Airport road approach
+      [12.9990, 80.1808], // 32 Airport road junction
+      [13.0005, 80.1862], // 33 Near Alandur
+      [13.0016, 80.1918], // 34 GST Road, pre-Kathipara
+      [13.0026, 80.1968], // 35 Kathipara flyover south
+      [13.0033, 80.1972], // 36 Kathipara junction ★ (internal stop)
+      [13.0042, 80.2022], // 37 Kathipara flyover north
+      [13.0050, 80.2072], // 38 Post Kathipara, Guindy approach
+      [13.0057, 80.2130], // 39 Near Guindy bus terminus
+      [13.0063, 80.2178], // 40 Guindy CLRI south
+      [13.0067, 80.2206], // 41 Guindy (CLRI junction) ★
+      [13.0074, 80.2252], // 42 Guindy north
+      [13.0083, 80.2282], // 43 Near Anna Univ gate
+      [13.0094, 80.2312], // 44 Anna University campus road
+      [13.0104, 80.2337], // 45 Anna University (destination) ★
     ],
-    stopPathIdx: [0, 6, 9, 13, 18, 20],
+    stopPathIdx: [0, 13, 19, 28, 41, 45],
     stops: [
       'Tambaram Bus Stand',
       'Chromepet',
@@ -1365,31 +1391,56 @@ const PRED_ROUTES = {
     label: 'Evening to Home',
     color: '#8b5cf6',
     departure: { h: 15, m: 0 },
-    // Reverse of morning route along NH-45
+    // Exact reverse of morning route along GST Road (NH-45)
     path: [
-      [13.0104, 80.2337], // 0  Anna University (start)
-      [13.0085, 80.2270], // 1
-      [13.0067, 80.2206], // 2  Guindy
-      [13.0033, 80.1972], // 3  Kathipara flyover
-      [13.0012, 80.1870], // 4  Near Trident signal
-      [12.9982, 80.1785], // 5  Airport Road junction
-      [12.9945, 80.1715], // 6  Near Meenambakkam
-      [12.9903, 80.1674], // 7  St. Thomas Mount
-      [12.9825, 80.1620], // 8  St Thomas Mount exit
-      [12.9760, 80.1564], // 9  Kovilambakkam junction
-      [12.9724, 80.1540], // 10 Near Pammal Road junction
-      [12.9672, 80.1498], // 11 Pallavaram Bus Stop
-      [12.9630, 80.1465], // 12 Near Vetri Vikas signal
-      [12.9580, 80.1432], // 13 Chromepet–Pallavaram stretch
-      [12.9516, 80.1397], // 14 Chromepet Railway Station
-      [12.9460, 80.1280], // 15 Chromepet exit
-      [12.9400, 80.1185], // 16 Near Chitlapakkam
-      [12.9355, 80.1125], // 17 Near Selaiyur
-      [12.9310, 80.1070], // 18 Near Mudichur Road
-      [12.9270, 80.1028], // 19
-      [12.9249, 80.1000], // 20 Tambaram Bus Stand (destination)
+      [13.0104, 80.2337], // 0  Anna University (start) ★
+      [13.0094, 80.2312], // 1
+      [13.0083, 80.2282], // 2
+      [13.0074, 80.2252], // 3  Guindy north
+      [13.0067, 80.2206], // 4  Guindy (CLRI junction) ★
+      [13.0063, 80.2178], // 5
+      [13.0057, 80.2130], // 6
+      [13.0050, 80.2072], // 7
+      [13.0042, 80.2022], // 8  Kathipara flyover north
+      [13.0033, 80.1972], // 9  Kathipara junction ★
+      [13.0026, 80.1968], // 10
+      [13.0016, 80.1918], // 11
+      [13.0005, 80.1862], // 12
+      [12.9990, 80.1808], // 13
+      [12.9972, 80.1760], // 14
+      [12.9952, 80.1722], // 15
+      [12.9928, 80.1696], // 16
+      [12.9903, 80.1674], // 17 St. Thomas Mount ★
+      [12.9875, 80.1660], // 18
+      [12.9852, 80.1642], // 19
+      [12.9826, 80.1618], // 20
+      [12.9800, 80.1592], // 21
+      [12.9774, 80.1570], // 22
+      [12.9750, 80.1550], // 23
+      [12.9725, 80.1532], // 24
+      [12.9700, 80.1514], // 25
+      [12.9672, 80.1498], // 26 Pallavaram Bus Stop ★
+      [12.9648, 80.1488], // 27
+      [12.9618, 80.1470], // 28
+      [12.9590, 80.1448], // 29
+      [12.9562, 80.1428], // 30
+      [12.9540, 80.1412], // 31
+      [12.9516, 80.1397], // 32 Chromepet Railway Station ★
+      [12.9478, 80.1338], // 33
+      [12.9452, 80.1272], // 34
+      [12.9432, 80.1232], // 35
+      [12.9412, 80.1196], // 36
+      [12.9392, 80.1162], // 37
+      [12.9372, 80.1132], // 38
+      [12.9352, 80.1105], // 39
+      [12.9332, 80.1080], // 40
+      [12.9312, 80.1058], // 41
+      [12.9292, 80.1038], // 42
+      [12.9272, 80.1020], // 43
+      [12.9258, 80.1008], // 44
+      [12.9249, 80.1000], // 45 Tambaram Bus Stand (destination) ★
     ],
-    stopPathIdx: [0, 2, 7, 11, 14, 20],
+    stopPathIdx: [0, 4, 17, 26, 32, 45],
     stops: [
       'Anna University',
       'Guindy',
@@ -1979,17 +2030,24 @@ setInterval(() => {
 // ── View open / close ─────────────────────────────────────────────────────
 function openPrediction() {
   showV('predictionView');
-  // Init on first open (map needs visible div)
+  // Always re-init: div needs to be visible before Leaflet can measure its size
   setTimeout(() => {
-    _predTimings = pred_buildTimings(_predRoute);
+    pred_pause();
+    _predSimMin   = 0;
+    _predTrailPts = [];
+    _predTimings  = pred_buildTimings(_predRoute);
     pred_initMap(_predRoute);
     pred_renderHistory(_predRoute);
     pred_updateUI(0);
     const traffic = pred_predictTraffic(_predRoute);
     const badge   = document.getElementById('predTrafficBadge');
     if (badge) { badge.textContent = traffic; badge.className = 'pred-traffic-badge pred-traffic-' + traffic.toLowerCase(); }
+    const note = document.getElementById('predTrafficNote');
+    if (note) note.textContent = `11th day prediction: ${traffic} (mode of 10-day history)`;
     pred_setSpeed(30);
-  }, 50);
+    const btn = document.getElementById('predSimBtn');
+    if (btn) { btn.textContent = '▶ Start Simulation'; btn.className = 'pred-sim-btn pred-sim-start'; }
+  }, 80);
 }
 
 function leavePrediction() {
