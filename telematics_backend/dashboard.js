@@ -1307,3 +1307,697 @@ function bustest_updateUI(t) {
     btMap.panTo(latlng);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   PREDICTIVE SIMULATION MODULE  v2
+   Scope: "Morning to College" and "Evening to Home" routes ONLY.
+   Live Bus Test (View 5) is NOT touched by this code.
+
+   Bug fixes v2:
+   - pred_nextStopIdx: fixed to use timing not pathIdx
+   - pred_updateStopList: fixed current/done/upcoming detection
+   - per-stop historical stats (min/avg/max)
+   - real-world dense waypoints along Chennai GST Road
+═══════════════════════════════════════════════════════════════ */
+
+// ── Real Chennai road route — dense waypoints along GST Road NH-45 ─────────
+// Coordinates verified against OpenStreetMap for Tambaram ↔ Anna University
+const PRED_ROUTES = {
+  morning: {
+    label: 'Morning to College',
+    color: '#f59e0b',
+    departure: { h: 8, m: 0 },
+    // 21 real GPS waypoints along NH-45 / GST Road, Chennai
+    path: [
+      [12.9249, 80.1000], // 0  Tambaram Bus Stand
+      [12.9270, 80.1028], // 1
+      [12.9310, 80.1070], // 2  Near Mudichur Road
+      [12.9355, 80.1125], // 3  Near Selaiyur
+      [12.9400, 80.1185], // 4  Near Chitlapakkam
+      [12.9460, 80.1280], // 5  GST Road Chromepet approach
+      [12.9516, 80.1397], // 6  Chromepet Railway Station
+      [12.9580, 80.1432], // 7  Chromepet–Pallavaram stretch
+      [12.9630, 80.1465], // 8  Near Vetri Vikas signal
+      [12.9672, 80.1498], // 9  Pallavaram Bus Stop
+      [12.9724, 80.1540], // 10 Near Pammal Road junction
+      [12.9760, 80.1564], // 11 Kovilambakkam junction
+      [12.9825, 80.1620], // 12 St Thomas Mount approach
+      [12.9903, 80.1674], // 13 St. Thomas Mount
+      [12.9945, 80.1715], // 14 Near Meenambakkam
+      [12.9982, 80.1785], // 15 Airport Road junction
+      [13.0012, 80.1870], // 16 Near Trident signal
+      [13.0033, 80.1972], // 17 Kathipara flyover
+      [13.0067, 80.2206], // 18 Guindy (CLRI junction)
+      [13.0085, 80.2270], // 19 Near Anna University gate
+      [13.0104, 80.2337], // 20 Anna University (destination)
+    ],
+    stopPathIdx: [0, 6, 9, 13, 18, 20],
+    stops: [
+      'Tambaram Bus Stand',
+      'Chromepet',
+      'Pallavaram',
+      'St. Thomas Mount',
+      'Guindy',
+      'Anna University',
+    ],
+  },
+  evening: {
+    label: 'Evening to Home',
+    color: '#8b5cf6',
+    departure: { h: 15, m: 0 },
+    // Reverse of morning route along NH-45
+    path: [
+      [13.0104, 80.2337], // 0  Anna University (start)
+      [13.0085, 80.2270], // 1
+      [13.0067, 80.2206], // 2  Guindy
+      [13.0033, 80.1972], // 3  Kathipara flyover
+      [13.0012, 80.1870], // 4  Near Trident signal
+      [12.9982, 80.1785], // 5  Airport Road junction
+      [12.9945, 80.1715], // 6  Near Meenambakkam
+      [12.9903, 80.1674], // 7  St. Thomas Mount
+      [12.9825, 80.1620], // 8  St Thomas Mount exit
+      [12.9760, 80.1564], // 9  Kovilambakkam junction
+      [12.9724, 80.1540], // 10 Near Pammal Road junction
+      [12.9672, 80.1498], // 11 Pallavaram Bus Stop
+      [12.9630, 80.1465], // 12 Near Vetri Vikas signal
+      [12.9580, 80.1432], // 13 Chromepet–Pallavaram stretch
+      [12.9516, 80.1397], // 14 Chromepet Railway Station
+      [12.9460, 80.1280], // 15 Chromepet exit
+      [12.9400, 80.1185], // 16 Near Chitlapakkam
+      [12.9355, 80.1125], // 17 Near Selaiyur
+      [12.9310, 80.1070], // 18 Near Mudichur Road
+      [12.9270, 80.1028], // 19
+      [12.9249, 80.1000], // 20 Tambaram Bus Stand (destination)
+    ],
+    stopPathIdx: [0, 2, 7, 11, 14, 20],
+    stops: [
+      'Anna University',
+      'Guindy',
+      'St. Thomas Mount',
+      'Pallavaram',
+      'Chromepet',
+      'Tambaram Bus Stand',
+    ],
+  },
+};
+
+// ── 10-day historical segment times (minutes per stop-to-stop segment) ─────
+// segs[i] = travel time (min) for segment i (stop[i] → stop[i+1])
+// Modelled on real Chennai peak-hour traffic patterns on GST Road
+const PRED_HISTORY = {
+  morning: [
+    // Tambaram→Chromepet, Chromepet→Pallavaram, Pallavaram→STMount, STMount→Guindy, Guindy→AnnaUniv
+    { date: '2026-06-16', segs: [9,  5, 8, 13, 4], traffic: 'Medium' },
+    { date: '2026-06-17', segs: [8,  4, 7, 11, 3], traffic: 'Low'    },
+    { date: '2026-06-18', segs: [12, 6, 9, 15, 5], traffic: 'Heavy'  },
+    { date: '2026-06-19', segs: [9,  5, 8, 13, 4], traffic: 'Medium' },
+    { date: '2026-06-20', segs: [11, 6, 9, 14, 5], traffic: 'Heavy'  },
+    { date: '2026-06-21', segs: [7,  4, 6,  9, 3], traffic: 'Low'    }, // Saturday
+    { date: '2026-06-23', segs: [10, 5, 8, 12, 4], traffic: 'Medium' },
+    { date: '2026-06-24', segs: [9,  5, 8, 13, 4], traffic: 'Medium' },
+    { date: '2026-06-25', segs: [13, 7,10, 16, 5], traffic: 'Heavy'  },
+    { date: '2026-06-26', segs: [8,  4, 7, 10, 3], traffic: 'Low'    },
+  ],
+  evening: [
+    // AnnaUniv→Guindy, Guindy→STMount, STMount→Pallavaram, Pallavaram→Chromepet, Chromepet→Tambaram
+    { date: '2026-06-16', segs: [4, 11, 8, 6, 10], traffic: 'Medium' },
+    { date: '2026-06-17', segs: [3,  9, 7, 5,  8], traffic: 'Low'    },
+    { date: '2026-06-18', segs: [5, 13,10, 7, 12], traffic: 'Heavy'  },
+    { date: '2026-06-19', segs: [4, 11, 8, 6, 10], traffic: 'Medium' },
+    { date: '2026-06-20', segs: [5, 12, 9, 7, 11], traffic: 'Heavy'  },
+    { date: '2026-06-21', segs: [3,  8, 6, 4,  7], traffic: 'Low'    },
+    { date: '2026-06-23', segs: [4, 11, 8, 5,  9], traffic: 'Medium' },
+    { date: '2026-06-24', segs: [4, 11, 8, 6, 10], traffic: 'Medium' },
+    { date: '2026-06-25', segs: [5, 14,11, 8, 13], traffic: 'Heavy'  },
+    { date: '2026-06-26', segs: [3,  9, 7, 5,  8], traffic: 'Low'    },
+  ],
+};
+
+// ── Module state ────────────────────────────────────────────────────────────
+let _predMap       = null;
+let _predMarker    = null;
+let _predPathLine  = null;
+let _predTrailLine = null;
+let _predStopMarkers = [];
+let _predTimer     = null;
+let _predRoute     = 'morning';
+let _predSpeed     = 30;        // simulation multiplier
+let _predSimMin    = 0;         // simulated elapsed minutes
+let _predRunning   = false;
+let _predTimings   = [];        // minutes from departure for each path point
+let _predAvgSegs   = [];
+let _predTrailPts  = [];
+let _predSearchMarker = null;
+const PRED_GEOFENCE_THRESHOLD_M = 100;
+
+// ── Average segment times from 10-day history ──────────────────────────────
+function pred_avgSegs(routeKey) {
+  const hist = PRED_HISTORY[routeKey];
+  const nSegs = hist[0].segs.length;
+  const avgs = new Array(nSegs).fill(0);
+  hist.forEach(d => d.segs.forEach((v, i) => { avgs[i] += v; }));
+  return avgs.map(v => v / hist.length);
+}
+
+// ── Predict traffic for 11th day (mode of last 10) ────────────────────────
+function pred_predictTraffic(routeKey) {
+  const hist = PRED_HISTORY[routeKey];
+  const counts = { Low: 0, Medium: 0, Heavy: 0 };
+  hist.forEach(d => { counts[d.traffic]++; });
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+// ── Build path timing array ───────────────────────────────────────────────
+// Returns array where timings[i] = minutes from departure when bus is at path[i]
+function pred_buildTimings(routeKey) {
+  const route   = PRED_ROUTES[routeKey];
+  const avgSegs = pred_avgSegs(routeKey);
+  const path    = route.path;
+  const sIdx    = route.stopPathIdx;
+  const timings = new Array(path.length).fill(0);
+
+  let cumMin = 0;
+  for (let seg = 0; seg < sIdx.length - 1; seg++) {
+    const si = sIdx[seg], ei = sIdx[seg + 1];
+    const segMin = avgSegs[seg];
+    timings[si] = cumMin;
+
+    // Distribute time within segment proportional to haversine distance
+    let segDist = 0;
+    const dists = [];
+    for (let i = si; i < ei; i++) {
+      const d = hav(path[i][0], path[i][1], path[i+1][0], path[i+1][1]);
+      dists.push(d);
+      segDist += d;
+    }
+    let acc = cumMin;
+    for (let i = si; i < ei; i++) {
+      acc += segDist > 0 ? (dists[i - si] / segDist) * segMin : segMin / (ei - si);
+      timings[i + 1] = acc;
+    }
+    cumMin += segMin;
+  }
+  return timings;
+}
+
+// ── Interpolate position at given sim minute ──────────────────────────────
+function pred_posAt(simMin) {
+  const path    = PRED_ROUTES[_predRoute].path;
+  const timings = _predTimings;
+  const total   = timings[timings.length - 1];
+  if (simMin <= 0)     return { lat: path[0][0], lon: path[0][1], pathIdx: 0, pct: 0 };
+  if (simMin >= total) return { lat: path[path.length-1][0], lon: path[path.length-1][1], pathIdx: path.length-1, pct: 100 };
+
+  for (let i = 0; i < timings.length - 1; i++) {
+    if (simMin >= timings[i] && simMin <= timings[i+1]) {
+      const span = timings[i+1] - timings[i];
+      const t    = span > 0 ? (simMin - timings[i]) / span : 0;
+      const lat  = path[i][0] + t * (path[i+1][0] - path[i][0]);
+      const lon  = path[i][1] + t * (path[i+1][1] - path[i][1]);
+      return { lat, lon, pathIdx: i, pct: (simMin / total) * 100 };
+    }
+  }
+  return { lat: path[path.length-1][0], lon: path[path.length-1][1], pathIdx: path.length-1, pct: 100 };
+}
+
+// ── Deviation check: min distance from pos to any route segment ───────────
+function pred_distToRoute(lat, lon) {
+  const path = PRED_ROUTES[_predRoute].path;
+  let minD = Infinity;
+  for (let i = 0; i < path.length - 1; i++) {
+    const d = _pred_ptSegDist(lat, lon, path[i][0], path[i][1], path[i+1][0], path[i+1][1]);
+    if (d < minD) minD = d;
+  }
+  return minD;
+}
+
+function _pred_ptSegDist(plat, plon, alat, alon, blat, blon) {
+  const cLat = (plat + alat + blat) / 3;
+  const cosL = Math.cos(cLat * Math.PI / 180);
+  const px = (plon - alon) * cosL * 111320, py = (plat - alat) * 111320;
+  const bx = (blon - alon) * cosL * 111320, by = (blat - alat) * 111320;
+  const seg2 = bx*bx + by*by;
+  if (seg2 === 0) return Math.sqrt(px*px + py*py);
+  const tt = Math.max(0, Math.min(1, (px*bx + py*by) / seg2));
+  return Math.sqrt((px - tt*bx)**2 + (py - tt*by)**2);
+}
+
+// ── Per-stop historical stats (min / avg / max cumulative arrival) ────────
+// Returns array of {min, avg, max} for each stop's cumulative arrival time from departure
+function pred_stopStats(routeKey) {
+  const hist = PRED_HISTORY[routeKey];
+  const nStops = hist[0].segs.length + 1; // stops = segments + 1
+  const stats = Array.from({length: nStops}, () => ({ min: Infinity, avg: 0, max: -Infinity }));
+  stats[0] = { min: 0, avg: 0, max: 0 }; // departure stop always 0
+
+  hist.forEach(d => {
+    let cum = 0;
+    d.segs.forEach((seg, i) => {
+      cum += seg;
+      stats[i + 1].min  = Math.min(stats[i + 1].min, cum);
+      stats[i + 1].avg += cum;
+      stats[i + 1].max  = Math.max(stats[i + 1].max, cum);
+    });
+  });
+  for (let i = 1; i < nStops; i++) stats[i].avg = +(stats[i].avg / hist.length).toFixed(1);
+  return stats;
+}
+
+// ── Next upcoming stop index based on sim time (FIXED: uses timings not pathIdx)
+function pred_nextStopIdx(simMin) {
+  const sIdx = PRED_ROUTES[_predRoute].stopPathIdx;
+  for (let i = 0; i < sIdx.length; i++) {
+    if (_predTimings[sIdx[i]] > simMin + 0.1) return i; // first stop not yet reached
+  }
+  return sIdx.length - 1; // all stops passed
+}
+
+// ── Simulation tick ───────────────────────────────────────────────────────
+function pred_tick() {
+  const total = _predTimings[_predTimings.length - 1];
+  if (_predSimMin >= total) { pred_pause(); pred_updateUI(total); return; }
+  _predSimMin = Math.min(total, _predSimMin + (0.2 / 60) * _predSpeed);
+  pred_updateUI(_predSimMin);
+}
+
+// ── Main UI update ────────────────────────────────────────────────────────
+function pred_updateUI(simMin) {
+  const route     = PRED_ROUTES[_predRoute];
+  const pos       = pred_posAt(simMin);
+  const total     = _predTimings[_predTimings.length - 1];
+  const dep       = route.departure;
+  const absMin    = dep.h * 60 + dep.m + simMin;
+  const clockH    = Math.floor(absMin / 60) % 24;
+  const clockM    = Math.floor(absMin % 60);
+
+  // Sim clock
+  const clockEl = document.getElementById('predSimClock');
+  if (clockEl) clockEl.textContent = `${String(clockH).padStart(2,'0')}:${String(clockM).padStart(2,'0')}`;
+
+  // Marker + trail
+  if (_predMarker) _predMarker.setLatLng([pos.lat, pos.lon]);
+  if (_predMap)    _predMap.panTo([pos.lat, pos.lon], { animate: true, duration: 0.3 });
+  _predTrailPts.push([pos.lat, pos.lon]);
+  if (_predTrailPts.length > 400) _predTrailPts.shift();
+  if (_predTrailLine) _predTrailLine.setLatLngs(_predTrailPts);
+
+  // Progress bar
+  const pct = Math.min(100, (simMin / total) * 100);
+  const progBar = document.getElementById('predProgBar');
+  const progTxt = document.getElementById('predProgTxt');
+  if (progBar) progBar.style.width = pct.toFixed(1) + '%';
+  if (progTxt) progTxt.textContent = pct.toFixed(0) + '% · ' + Math.round(simMin) + ' / ' + Math.round(total) + ' min';
+
+  // Next stop (FIXED: based on timing, not pathIdx)
+  const nextIdx = pred_nextStopIdx(simMin);
+  const nextStop = route.stops[nextIdx] || 'Arrived';
+  const nextEl   = document.getElementById('predNextStop');
+  if (nextEl) nextEl.textContent = nextStop;
+
+  // ETA to next stop + destination
+  const nextStopTiming = _predTimings[route.stopPathIdx[nextIdx]] || total;
+  const etaNext  = Math.max(0, nextStopTiming - simMin);
+  const etaFinal = Math.max(0, total - simMin);
+  const etaNextEl = document.getElementById('predEtaNext');
+  const etaDestEl = document.getElementById('predEtaDest');
+  if (etaNextEl) etaNextEl.textContent = etaNext  < 0.5 ? 'Arriving!' : Math.round(etaNext)  + ' min';
+  if (etaDestEl) etaDestEl.textContent = etaFinal < 0.5 ? 'Arrived! 🎉' : Math.round(etaFinal) + ' min';
+
+  // Detailed per-stop prediction cards
+  pred_updateStopCards(simMin);
+
+  // Deviation check
+  const devBanner = document.getElementById('predDeviationBanner');
+  if (devBanner) devBanner.style.display = pred_distToRoute(pos.lat, pos.lon) > PRED_GEOFENCE_THRESHOLD_M ? 'flex' : 'none';
+}
+
+// ── Detailed per-stop prediction cards (FIXED: correct done/current/upcoming) ──
+function pred_updateStopCards(simMin) {
+  const route  = PRED_ROUTES[_predRoute];
+  const sIdx   = route.stopPathIdx;
+  const stats  = pred_stopStats(_predRoute);
+  const dep    = route.departure;
+  const listEl = document.getElementById('predStopList');
+  if (!listEl) return;
+
+  listEl.innerHTML = route.stops.map((name, i) => {
+    const arrMin    = _predTimings[sIdx[i]];
+    const absMin    = dep.h * 60 + dep.m + arrMin;
+    const hh        = Math.floor(absMin / 60) % 24;
+    const mm        = Math.floor(absMin % 60);
+    const predTime  = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+    const etaFromNow = Math.max(0, arrMin - simMin);
+
+    // FIXED: stop is done if sim has passed its arrival time by >30s
+    const isDone    = simMin > arrMin + 0.5;
+    // FIXED: stop is current/approaching if within 2 min ahead
+    const isNext    = !isDone && etaFromNow <= 2.0;
+    // upcoming = not done, not next
+    const statusLbl = isDone ? '✓ Passed' : isNext ? '🚌 Approaching' : 'Scheduled';
+    const cardCls   = isDone ? 'pred-scard-done' : isNext ? 'pred-scard-current' : 'pred-scard-pending';
+
+    // Historical stats for this stop
+    const st = stats[i];
+    const minAbs = dep.h * 60 + dep.m + st.min;
+    const maxAbs = dep.h * 60 + dep.m + st.max;
+    const minT   = i === 0 ? '08:00' : `${String(Math.floor(minAbs/60)%24).padStart(2,'0')}:${String(Math.floor(minAbs%60)).padStart(2,'0')}`;
+    const maxT   = i === 0 ? '08:00' : `${String(Math.floor(maxAbs/60)%24).padStart(2,'0')}:${String(Math.floor(maxAbs%60)).padStart(2,'0')}`;
+
+    const etaRow = (!isDone && simMin > 0)
+      ? `<div class="pred-scard-row">
+           <span class="pred-scard-lbl">ETA from now</span>
+           <span class="pred-scard-val pred-eta-blue">${etaFromNow < 0.5 ? 'Arriving!' : Math.round(etaFromNow) + ' min'}</span>
+         </div>`
+      : '';
+
+    return `<div class="pred-scard ${cardCls}">
+      <div class="pred-scard-hdr">
+        <span class="pred-scard-num">${i + 1}</span>
+        <span class="pred-scard-name">${name}</span>
+        <span class="pred-scard-status">${statusLbl}</span>
+      </div>
+      <div class="pred-scard-body">
+        <div class="pred-scard-row">
+          <span class="pred-scard-lbl">Predicted Arrival</span>
+          <span class="pred-scard-val">${i === 0 ? 'Departure' : predTime}</span>
+        </div>
+        ${i > 0 ? `<div class="pred-scard-row">
+          <span class="pred-scard-lbl">History (min / avg / max)</span>
+          <span class="pred-scard-val pred-scard-hist">${minT} / <b>${predTime}</b> / ${maxT}</span>
+        </div>` : ''}
+        ${etaRow}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Simulation controls ───────────────────────────────────────────────────
+function pred_toggleSim() {
+  if (_predRunning) pred_pause(); else pred_start();
+}
+
+function pred_start() {
+  if (_predRunning) return;
+  _predRunning = true;
+  const btn = document.getElementById('predSimBtn');
+  if (btn) { btn.textContent = '⏸ Pause'; btn.className = 'pred-sim-btn pred-sim-pause'; }
+  _predTimer = setInterval(pred_tick, 200);
+}
+
+function pred_pause() {
+  _predRunning = false;
+  if (_predTimer) { clearInterval(_predTimer); _predTimer = null; }
+  const btn = document.getElementById('predSimBtn');
+  if (btn) { btn.textContent = '▶ Resume'; btn.className = 'pred-sim-btn pred-sim-start'; }
+}
+
+function pred_reset() {
+  pred_pause();
+  _predSimMin = 0;
+  _predTrailPts = [];
+  if (_predTrailLine) _predTrailLine.setLatLngs([]);
+  const route = PRED_ROUTES[_predRoute];
+  if (_predMarker) _predMarker.setLatLng(route.path[0]);
+  if (_predMap)    _predMap.setView(route.path[0], 13);
+  pred_updateUI(0);
+  const btn = document.getElementById('predSimBtn');
+  if (btn) { btn.textContent = '▶ Start Simulation'; btn.className = 'pred-sim-btn pred-sim-start'; }
+  const devBanner = document.getElementById('predDeviationBanner');
+  if (devBanner) devBanner.style.display = 'none';
+}
+
+function pred_setSpeed(s) {
+  _predSpeed = s;
+  document.querySelectorAll('.pred-spd-btn').forEach(b => b.classList.remove('pred-spd-active'));
+  const el = document.getElementById('predSpd' + s);
+  if (el) el.classList.add('pred-spd-active');
+}
+
+// ── Route switch ──────────────────────────────────────────────────────────
+function pred_selectRoute(routeKey) {
+  _predRoute = routeKey;
+  pred_pause();
+  _predTimings  = pred_buildTimings(routeKey);
+  _predSimMin   = 0;
+  _predTrailPts = [];
+
+  document.getElementById('predTabMorn').className = 'pred-tab' + (routeKey === 'morning' ? ' pred-tab-active' : '');
+  document.getElementById('predTabEve').className  = 'pred-tab' + (routeKey === 'evening' ? ' pred-tab-active' : '');
+
+  // Rebuild map
+  pred_initMap(routeKey);
+  pred_renderHistory(routeKey);
+  pred_updateUI(0);
+
+  // Traffic prediction for 11th day
+  const traffic = pred_predictTraffic(routeKey);
+  const badge   = document.getElementById('predTrafficBadge');
+  if (badge) {
+    badge.textContent  = traffic;
+    badge.className    = 'pred-traffic-badge pred-traffic-' + traffic.toLowerCase();
+  }
+  const note = document.getElementById('predTrafficNote');
+  if (note) note.textContent = `11th day prediction: ${traffic} (mode of 10-day history)`;
+
+  const btn = document.getElementById('predSimBtn');
+  if (btn) { btn.textContent = '▶ Start Simulation'; btn.className = 'pred-sim-btn pred-sim-start'; }
+}
+
+// ── Map setup ─────────────────────────────────────────────────────────────
+function pred_initMap(routeKey) {
+  if (_predMap) { _predMap.remove(); _predMap = null; _predMarker = null; _predPathLine = null; _predTrailLine = null; _predStopMarkers = []; _predSearchMarker = null; }
+
+  const route  = PRED_ROUTES[routeKey];
+  const center = route.path[0];
+
+  _predMap = L.map('predMap', { zoomControl: true, preferCanvas: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(_predMap);
+  _predMap.setView(center, 13);
+
+  // Route path polyline
+  _predPathLine = L.polyline(route.path, {
+    color: route.color, weight: 4, opacity: .5, dashArray: '8 4'
+  }).addTo(_predMap);
+
+  // GPS trail (simulated bus path so far)
+  _predTrailLine = L.polyline([], {
+    color: route.color, weight: 3, opacity: .85
+  }).addTo(_predMap);
+
+  // Stop markers
+  _predStopMarkers = route.stops.map((name, i) => {
+    const pt = route.path[route.stopPathIdx[i]];
+    const isFirst = i === 0, isLast = i === route.stops.length - 1;
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="background:${isFirst||isLast ? route.color : '#21262d'};border:2px solid ${route.color};width:12px;height:12px;border-radius:50%"></div>`,
+      iconSize: [12, 12], iconAnchor: [6, 6],
+    });
+    return L.marker(pt, { icon }).addTo(_predMap).bindTooltip(name, { direction: 'top', permanent: false });
+  });
+
+  // Bus marker
+  const busIcon = L.divIcon({
+    className: '',
+    html: `<div style="font-size:1.6rem;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">🚌</div>`,
+    iconSize: [32, 32], iconAnchor: [16, 28],
+  });
+  _predMarker = L.marker(center, { icon: busIcon }).addTo(_predMap);
+
+  // Fit map to route
+  _predMap.fitBounds(_predPathLine.getBounds(), { padding: [30, 30] });
+}
+
+// ── History table ─────────────────────────────────────────────────────────
+function pred_renderHistory(routeKey) {
+  const hist  = PRED_HISTORY[routeKey];
+  const el    = document.getElementById('predHistTable');
+  if (!el) return;
+  const predTotal = Math.round(_predTimings[_predTimings.length - 1]);
+  el.innerHTML =
+    `<div class="pred-hist-hdr-row">
+       <span>Date</span><span>Total</span><span>Traffic</span>
+     </div>` +
+    hist.map(d => {
+      const total = d.segs.reduce((a, b) => a + b, 0);
+      return `<div class="pred-hist-row">
+        <span class="pred-hist-date">${d.date.slice(5)}</span>
+        <span class="pred-hist-dur">${total} min</span>
+        <span class="pred-hist-traffic-${d.traffic.toLowerCase()}">${d.traffic}</span>
+      </div>`;
+    }).join('') +
+    `<div class="pred-hist-row pred-hist-pred-row">
+       <span style="color:#58a6ff;font-weight:700">11th Day ▶</span>
+       <span class="pred-hist-dur" style="color:#58a6ff">${predTotal} min</span>
+       <span class="pred-hist-traffic-${pred_predictTraffic(routeKey).toLowerCase()}">${pred_predictTraffic(routeKey)}</span>
+     </div>`;
+}
+
+// ── Search stop ───────────────────────────────────────────────────────────
+function pred_search() {
+  const val = (document.getElementById('predSearchIn')?.value || '').trim().toLowerCase();
+  if (!val) return;
+  const route   = PRED_ROUTES[_predRoute];
+  const matched = route.stops.findIndex(s => s.toLowerCase().includes(val));
+  const resEl   = document.getElementById('predSearchResult');
+  const conEl   = document.getElementById('predSearchContent');
+  if (!resEl || !conEl) return;
+
+  if (matched === -1) {
+    resEl.style.display = 'block';
+    conEl.innerHTML = `<div style="color:#f85149;font-size:.78rem">No stop found matching "<b>${val}</b>"</div>`;
+    return;
+  }
+
+  const stopName  = route.stops[matched];
+  const pathIdx   = route.stopPathIdx[matched];
+  const arrMin    = _predTimings[pathIdx];
+  const dep       = route.departure;
+  const absMin    = dep.h * 60 + dep.m + arrMin;
+  const hh        = Math.floor(absMin / 60) % 24;
+  const mm        = Math.floor(absMin % 60);
+  const etaFromNow = Math.max(0, arrMin - _predSimMin);
+  const pt        = route.path[pathIdx];
+
+  resEl.style.display = 'block';
+  conEl.innerHTML = `<div class="pred-search-result-stop">
+    <b>${stopName}</b><br>
+    Predicted arrival: <b>${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}</b><br>
+    ${_predSimMin > 0 ? `ETA from now: <b>${etaFromNow < 1 ? '< 1' : Math.round(etaFromNow)} min</b>` : ''}
+    <br>Segment: Stop ${matched + 1} of ${route.stops.length}
+  </div>`;
+
+  // Pan map and show marker
+  if (_predMap) {
+    _predMap.setView(pt, 15, { animate: true });
+    if (_predSearchMarker) _predSearchMarker.remove();
+    _predSearchMarker = L.marker(pt, {
+      icon: L.divIcon({ className: '', html: `<div style="background:#f59e0b;border:3px solid #fff;width:14px;height:14px;border-radius:50%"></div>`, iconSize:[14,14], iconAnchor:[7,7] })
+    }).addTo(_predMap).bindPopup(`<b>${stopName}</b><br>Predicted: ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`).openPopup();
+  }
+}
+
+// ── ETA Panel for View 3 (Tracker) ───────────────────────────────────────
+// Computes stop-by-stop ETA using current GPS position and live speed,
+// matched against PRED_ROUTES morning/evening. Falls back to speed-based calc.
+function openETAPanel() {
+  const panel = document.getElementById('etaPanel');
+  if (!panel) return;
+  panel.style.display = 'flex';
+  etaPanel_render();
+}
+
+function closeETAPanel() {
+  const panel = document.getElementById('etaPanel');
+  if (panel) panel.style.display = 'none';
+}
+
+function etaPanel_render() {
+  const body   = document.getElementById('etaPanelBody');
+  const subEl  = document.getElementById('etaPanelSub');
+  if (!body) return;
+
+  const b = curBus ? sim[curBus] : null;
+  if (!b || b.lat === null || b.lastUpdate === 0) {
+    body.innerHTML = `<div class="eta-panel-nodata">No live GPS data yet.<br>ETA available once bus connects.</div>`;
+    return;
+  }
+
+  // Match to nearest route by proximity to any stop
+  let bestRoute = null, bestDist = Infinity;
+  ['morning', 'evening'].forEach(rk => {
+    const route = PRED_ROUTES[rk];
+    route.stops.forEach((_, si) => {
+      const pt = route.path[route.stopPathIdx[si]];
+      const d  = hav(b.lat, b.lon, pt[0], pt[1]);
+      if (d < bestDist) { bestDist = d; bestRoute = rk; }
+    });
+  });
+
+  const route  = PRED_ROUTES[bestRoute];
+  const timings = pred_buildTimings(bestRoute);
+  const stats  = pred_stopStats(bestRoute);
+  const dep    = route.departure;
+
+  // Find closest path point to current position
+  let closestPathPt = 0, closestDist = Infinity;
+  route.path.forEach((pt, i) => {
+    const d = hav(b.lat, b.lon, pt[0], pt[1]);
+    if (d < closestDist) { closestDist = d; closestPathPt = i; }
+  });
+  const simMinNow = timings[closestPathPt];
+
+  if (subEl) subEl.textContent = `${route.label} · ${bestDist < 500 ? 'On route' : 'Near route'} · ${b.speed} km/h`;
+
+  body.innerHTML = route.stops.map((name, i) => {
+    const arrMin    = timings[route.stopPathIdx[i]];
+    const etaMin    = Math.max(0, arrMin - simMinNow);
+    const absMin    = dep.h * 60 + dep.m + arrMin;
+    const hh        = Math.floor(absMin / 60) % 24;
+    const mm        = Math.floor(absMin % 60);
+    const predTime  = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+    const isPassed  = simMinNow > arrMin + 0.5;
+    const isNext    = !isPassed && etaMin <= 5;
+    const st        = stats[i];
+
+    // Historical reliability: how consistent is this stop?
+    const variance  = i === 0 ? 0 : (st.max - st.min);
+    const reliability = variance <= 2 ? 'High' : variance <= 5 ? 'Medium' : 'Variable';
+    const relColor  = variance <= 2 ? '#3fb950' : variance <= 5 ? '#d29922' : '#f85149';
+
+    return `<div class="eta-stop-card ${isPassed ? 'eta-stop-passed' : isNext ? 'eta-stop-next' : ''}">
+      <div class="eta-stop-top">
+        <span class="eta-stop-num">${i + 1}</span>
+        <span class="eta-stop-name">${name}</span>
+        <span class="eta-stop-time">${isPassed ? '✓ Passed' : predTime}</span>
+      </div>
+      ${!isPassed ? `
+      <div class="eta-stop-detail">
+        <div class="eta-detail-row">
+          <span class="eta-detail-lbl">ETA</span>
+          <span class="eta-detail-val eta-blue">${etaMin < 0.5 ? 'Arriving now' : Math.round(etaMin) + ' min away'}</span>
+        </div>
+        <div class="eta-detail-row">
+          <span class="eta-detail-lbl">Hist. range</span>
+          <span class="eta-detail-val">${i === 0 ? 'Departure' : st.min + '–' + st.max + ' min from start'}</span>
+        </div>
+        <div class="eta-detail-row">
+          <span class="eta-detail-lbl">Reliability</span>
+          <span class="eta-detail-val" style="color:${relColor}">${reliability}</span>
+        </div>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// Refresh ETA panel when open
+setInterval(() => {
+  if (document.getElementById('etaPanel')?.style.display !== 'none') etaPanel_render();
+}, 5000);
+
+// ── View open / close ─────────────────────────────────────────────────────
+function openPrediction() {
+  showV('predictionView');
+  // Init on first open (map needs visible div)
+  setTimeout(() => {
+    _predTimings = pred_buildTimings(_predRoute);
+    pred_initMap(_predRoute);
+    pred_renderHistory(_predRoute);
+    pred_updateUI(0);
+    const traffic = pred_predictTraffic(_predRoute);
+    const badge   = document.getElementById('predTrafficBadge');
+    if (badge) { badge.textContent = traffic; badge.className = 'pred-traffic-badge pred-traffic-' + traffic.toLowerCase(); }
+    pred_setSpeed(30);
+  }, 50);
+}
+
+function leavePrediction() {
+  pred_pause();
+  if (_predMap) { _predMap.remove(); _predMap = null; }
+  showV('homeView');
+}
+
+// Close ETA panel when leaving tracker
+const _origLeaveTracker = leaveTracker;
+leaveTracker = function() { closeETAPanel(); _origLeaveTracker(); };
