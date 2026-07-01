@@ -1307,3 +1307,530 @@ function bustest_updateUI(t) {
     btMap.panTo(latlng);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   PREDICTIVE SIMULATION MODULE
+   Scope: "Morning to College" and "Evening to Home" routes ONLY.
+   Live Bus Test (View 5) is NOT touched by this code.
+═══════════════════════════════════════════════════════════════ */
+
+// ── Real Chennai road route (GST Road — Tambaram ↔ Anna University) ────────
+const PRED_ROUTES = {
+  morning: {
+    label: 'Morning to College',
+    color: '#f59e0b',
+    departure: { h: 8, m: 0 },
+    // path: actual road waypoints along GST Road, Chennai
+    path: [
+      [12.9249, 80.1000], // Tambaram Bus Stand
+      [12.9298, 80.1055],
+      [12.9380, 80.1134],
+      [12.9450, 80.1255],
+      [12.9516, 80.1397], // Chromepet
+      [12.9580, 80.1430],
+      [12.9620, 80.1465],
+      [12.9672, 80.1498], // Pallavaram
+      [12.9740, 80.1556],
+      [12.9810, 80.1615],
+      [12.9903, 80.1674], // St. Thomas Mount
+      [12.9945, 80.1715],
+      [12.9975, 80.1810],
+      [13.0012, 80.1945],
+      [13.0040, 80.2060],
+      [13.0067, 80.2206], // Guindy
+      [13.0085, 80.2270],
+      [13.0104, 80.2337], // Anna University (destination)
+    ],
+    // which path[] index each stop lives at
+    stopPathIdx: [0, 4, 7, 10, 15, 17],
+    stops: [
+      'Tambaram Bus Stand',
+      'Chromepet',
+      'Pallavaram',
+      'St. Thomas Mount',
+      'Guindy',
+      'Anna University',
+    ],
+  },
+  evening: {
+    label: 'Evening to Home',
+    color: '#8b5cf6',
+    departure: { h: 15, m: 0 },
+    path: [
+      [13.0104, 80.2337], // Anna University (start)
+      [13.0085, 80.2270],
+      [13.0067, 80.2206], // Guindy
+      [13.0040, 80.2060],
+      [13.0012, 80.1945],
+      [12.9975, 80.1810],
+      [12.9945, 80.1715],
+      [12.9903, 80.1674], // St. Thomas Mount
+      [12.9810, 80.1615],
+      [12.9740, 80.1556],
+      [12.9672, 80.1498], // Pallavaram
+      [12.9620, 80.1465],
+      [12.9580, 80.1430],
+      [12.9516, 80.1397], // Chromepet
+      [12.9450, 80.1255],
+      [12.9380, 80.1134],
+      [12.9298, 80.1055],
+      [12.9249, 80.1000], // Tambaram (destination)
+    ],
+    stopPathIdx: [0, 2, 7, 10, 13, 17],
+    stops: [
+      'Anna University',
+      'Guindy',
+      'St. Thomas Mount',
+      'Pallavaram',
+      'Chromepet',
+      'Tambaram Bus Stand',
+    ],
+  },
+};
+
+// ── 10-day historical segment times (minutes per stop-to-stop segment) ─────
+// 5 segments per route (6 stops → 5 gaps)
+const PRED_HISTORY = {
+  morning: [
+    { date: '2026-06-16', segs: [9,  5, 7, 11, 6],  traffic: 'Medium' },
+    { date: '2026-06-17', segs: [8,  4, 7, 10, 5],  traffic: 'Low'    },
+    { date: '2026-06-18', segs: [11, 6, 8, 13, 7],  traffic: 'Heavy'  },
+    { date: '2026-06-19', segs: [9,  5, 7, 11, 5],  traffic: 'Medium' },
+    { date: '2026-06-20', segs: [10, 5, 8, 12, 6],  traffic: 'Heavy'  },
+    { date: '2026-06-21', segs: [7,  4, 6,  9, 4],  traffic: 'Low'    },
+    { date: '2026-06-23', segs: [10, 5, 7, 11, 5],  traffic: 'Medium' },
+    { date: '2026-06-24', segs: [9,  5, 8, 12, 6],  traffic: 'Medium' },
+    { date: '2026-06-25', segs: [12, 6, 9, 14, 7],  traffic: 'Heavy'  },
+    { date: '2026-06-26', segs: [8,  5, 7, 10, 5],  traffic: 'Low'    },
+  ],
+  evening: [
+    { date: '2026-06-16', segs: [6,  9,  7, 5,  8],  traffic: 'Medium' },
+    { date: '2026-06-17', segs: [5,  8,  6, 4,  7],  traffic: 'Low'    },
+    { date: '2026-06-18', segs: [7, 11,  8, 6, 10],  traffic: 'Heavy'  },
+    { date: '2026-06-19', segs: [6,  9,  7, 5,  8],  traffic: 'Medium' },
+    { date: '2026-06-20', segs: [7, 10,  8, 6,  9],  traffic: 'Heavy'  },
+    { date: '2026-06-21', segs: [5,  7,  5, 4,  6],  traffic: 'Low'    },
+    { date: '2026-06-23', segs: [6,  9,  7, 5,  8],  traffic: 'Medium' },
+    { date: '2026-06-24', segs: [6, 10,  7, 5,  8],  traffic: 'Medium' },
+    { date: '2026-06-25', segs: [8, 12,  9, 7, 11],  traffic: 'Heavy'  },
+    { date: '2026-06-26', segs: [5,  8,  6, 4,  7],  traffic: 'Low'    },
+  ],
+};
+
+// ── Module state ────────────────────────────────────────────────────────────
+let _predMap       = null;
+let _predMarker    = null;
+let _predPathLine  = null;
+let _predTrailLine = null;
+let _predStopMarkers = [];
+let _predTimer     = null;
+let _predRoute     = 'morning';
+let _predSpeed     = 30;        // simulation multiplier
+let _predSimMin    = 0;         // simulated elapsed minutes
+let _predRunning   = false;
+let _predTimings   = [];        // minutes from departure for each path point
+let _predAvgSegs   = [];
+let _predTrailPts  = [];
+let _predSearchMarker = null;
+const PRED_GEOFENCE_THRESHOLD_M = 100;
+
+// ── Average segment times from 10-day history ──────────────────────────────
+function pred_avgSegs(routeKey) {
+  const hist = PRED_HISTORY[routeKey];
+  const nSegs = hist[0].segs.length;
+  const avgs = new Array(nSegs).fill(0);
+  hist.forEach(d => d.segs.forEach((v, i) => { avgs[i] += v; }));
+  return avgs.map(v => v / hist.length);
+}
+
+// ── Predict traffic for 11th day (mode of last 10) ────────────────────────
+function pred_predictTraffic(routeKey) {
+  const hist = PRED_HISTORY[routeKey];
+  const counts = { Low: 0, Medium: 0, Heavy: 0 };
+  hist.forEach(d => { counts[d.traffic]++; });
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+// ── Build path timing array ───────────────────────────────────────────────
+// Returns array where timings[i] = minutes from departure when bus is at path[i]
+function pred_buildTimings(routeKey) {
+  const route   = PRED_ROUTES[routeKey];
+  const avgSegs = pred_avgSegs(routeKey);
+  const path    = route.path;
+  const sIdx    = route.stopPathIdx;
+  const timings = new Array(path.length).fill(0);
+
+  let cumMin = 0;
+  for (let seg = 0; seg < sIdx.length - 1; seg++) {
+    const si = sIdx[seg], ei = sIdx[seg + 1];
+    const segMin = avgSegs[seg];
+    timings[si] = cumMin;
+
+    // Distribute time within segment proportional to haversine distance
+    let segDist = 0;
+    const dists = [];
+    for (let i = si; i < ei; i++) {
+      const d = hav(path[i][0], path[i][1], path[i+1][0], path[i+1][1]);
+      dists.push(d);
+      segDist += d;
+    }
+    let acc = cumMin;
+    for (let i = si; i < ei; i++) {
+      acc += segDist > 0 ? (dists[i - si] / segDist) * segMin : segMin / (ei - si);
+      timings[i + 1] = acc;
+    }
+    cumMin += segMin;
+  }
+  return timings;
+}
+
+// ── Interpolate position at given sim minute ──────────────────────────────
+function pred_posAt(simMin) {
+  const path    = PRED_ROUTES[_predRoute].path;
+  const timings = _predTimings;
+  const total   = timings[timings.length - 1];
+  if (simMin <= 0)     return { lat: path[0][0], lon: path[0][1], pathIdx: 0, pct: 0 };
+  if (simMin >= total) return { lat: path[path.length-1][0], lon: path[path.length-1][1], pathIdx: path.length-1, pct: 100 };
+
+  for (let i = 0; i < timings.length - 1; i++) {
+    if (simMin >= timings[i] && simMin <= timings[i+1]) {
+      const span = timings[i+1] - timings[i];
+      const t    = span > 0 ? (simMin - timings[i]) / span : 0;
+      const lat  = path[i][0] + t * (path[i+1][0] - path[i][0]);
+      const lon  = path[i][1] + t * (path[i+1][1] - path[i][1]);
+      return { lat, lon, pathIdx: i, pct: (simMin / total) * 100 };
+    }
+  }
+  return { lat: path[path.length-1][0], lon: path[path.length-1][1], pathIdx: path.length-1, pct: 100 };
+}
+
+// ── Deviation check: min distance from pos to any route segment ───────────
+function pred_distToRoute(lat, lon) {
+  const path = PRED_ROUTES[_predRoute].path;
+  let minD = Infinity;
+  for (let i = 0; i < path.length - 1; i++) {
+    const d = _pred_ptSegDist(lat, lon, path[i][0], path[i][1], path[i+1][0], path[i+1][1]);
+    if (d < minD) minD = d;
+  }
+  return minD;
+}
+
+function _pred_ptSegDist(plat, plon, alat, alon, blat, blon) {
+  const cLat = (plat + alat + blat) / 3;
+  const cosL = Math.cos(cLat * Math.PI / 180);
+  const px = (plon - alon) * cosL * 111320, py = (plat - alat) * 111320;
+  const bx = (blon - alon) * cosL * 111320, by = (blat - alat) * 111320;
+  const seg2 = bx*bx + by*by;
+  if (seg2 === 0) return Math.sqrt(px*px + py*py);
+  const tt = Math.max(0, Math.min(1, (px*bx + py*by) / seg2));
+  return Math.sqrt((px - tt*bx)**2 + (py - tt*by)**2);
+}
+
+// ── Get next upcoming stop index ──────────────────────────────────────────
+function pred_nextStopIdx(pathIdx) {
+  const sIdx = PRED_ROUTES[_predRoute].stopPathIdx;
+  for (let i = 0; i < sIdx.length; i++) {
+    if (sIdx[i] > pathIdx) return i;
+  }
+  return sIdx.length - 1;
+}
+
+// ── UI update on each simulation tick ────────────────────────────────────
+function pred_tick() {
+  const total = _predTimings[_predTimings.length - 1];
+  if (_predSimMin >= total) {
+    pred_pause();
+    pred_updateUI(_predSimMin);
+    return;
+  }
+  _predSimMin += (0.2 / 60) * _predSpeed; // 200ms real = (0.2s × speed) / 60 min
+  pred_updateUI(_predSimMin);
+}
+
+function pred_updateUI(simMin) {
+  const route    = PRED_ROUTES[_predRoute];
+  const pos      = pred_posAt(simMin);
+  const total    = _predTimings[_predTimings.length - 1];
+  const dep      = route.departure;
+  const simAbsMin = dep.h * 60 + dep.m + simMin;
+  const clockH   = Math.floor(simAbsMin / 60) % 24;
+  const clockM   = Math.floor(simAbsMin % 60);
+
+  // Clock
+  const clockEl = document.getElementById('predSimClock');
+  if (clockEl) clockEl.textContent = `${String(clockH).padStart(2,'0')}:${String(clockM).padStart(2,'0')}`;
+
+  // Marker
+  if (_predMarker) _predMarker.setLatLng([pos.lat, pos.lon]);
+  if (_predMap)    _predMap.panTo([pos.lat, pos.lon], { animate: true, duration: 0.3 });
+
+  // Trail
+  _predTrailPts.push([pos.lat, pos.lon]);
+  if (_predTrailPts.length > 300) _predTrailPts.shift();
+  if (_predTrailLine) _predTrailLine.setLatLngs(_predTrailPts);
+
+  // Progress
+  const pct = Math.min(100, pos.pct);
+  const progBar = document.getElementById('predProgBar');
+  const progTxt = document.getElementById('predProgTxt');
+  if (progBar) progBar.style.width = pct.toFixed(1) + '%';
+  if (progTxt) progTxt.textContent = pct.toFixed(0) + '% · ' + Math.round(simMin) + ' / ' + Math.round(total) + ' min';
+
+  // Next stop
+  const nextIdx  = pred_nextStopIdx(pos.pathIdx);
+  const nextStop = route.stops[nextIdx];
+  const nextEl   = document.getElementById('predNextStop');
+  if (nextEl) nextEl.textContent = nextStop || 'Arrived';
+
+  // ETA to next stop
+  const nextPathIdx = route.stopPathIdx[nextIdx];
+  const etaMin = nextPathIdx !== undefined ? Math.max(0, _predTimings[nextPathIdx] - simMin) : 0;
+  const etaFinal = Math.max(0, total - simMin);
+  const etaNextEl = document.getElementById('predEtaNext');
+  const etaDestEl = document.getElementById('predEtaDest');
+  if (etaNextEl) etaNextEl.textContent = etaMin < 1 ? '< 1 min' : Math.round(etaMin) + ' min';
+  if (etaDestEl) etaDestEl.textContent = etaFinal < 1 ? 'Arrived!' : Math.round(etaFinal) + ' min';
+
+  // Stop progress list
+  pred_updateStopList(simMin);
+
+  // Deviation check
+  const devBanner = document.getElementById('predDeviationBanner');
+  if (devBanner) {
+    const distOff = pred_distToRoute(pos.lat, pos.lon);
+    devBanner.style.display = distOff > PRED_GEOFENCE_THRESHOLD_M ? 'flex' : 'none';
+  }
+}
+
+function pred_updateStopList(simMin) {
+  const route  = PRED_ROUTES[_predRoute];
+  const sIdx   = route.stopPathIdx;
+  const listEl = document.getElementById('predStopList');
+  if (!listEl) return;
+
+  const pos    = pred_posAt(simMin);
+  const nextI  = pred_nextStopIdx(pos.pathIdx);
+
+  listEl.innerHTML = route.stops.map((name, i) => {
+    const arrMin  = _predTimings[sIdx[i]];
+    const dep2    = route.departure;
+    const abs     = dep2.h * 60 + dep2.m + arrMin;
+    const hh      = Math.floor(abs / 60) % 24;
+    const mm      = Math.floor(abs % 60);
+    const timeStr = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+    const isDone  = simMin > arrMin;
+    const isCur   = i === nextI - 1 || (i === 0 && simMin < _predTimings[sIdx[1]]);
+    const cls     = isCur ? 'pred-stop-current' : isDone ? 'pred-stop-done' : 'pred-stop-pending';
+    const dotCls  = isCur ? 'pred-stop-dot-current' : isDone ? 'pred-stop-dot-done' : 'pred-stop-dot-pending';
+    const etaTxt  = isDone ? '✓ Departed' : isCur ? 'Arriving…' : timeStr;
+    return `<div class="pred-stop-row ${cls}">
+      <div class="pred-stop-dot ${dotCls}"></div>
+      <div class="pred-stop-name">${i+1}. ${name}</div>
+      <div class="pred-stop-eta">${etaTxt}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Simulation controls ───────────────────────────────────────────────────
+function pred_toggleSim() {
+  if (_predRunning) pred_pause(); else pred_start();
+}
+
+function pred_start() {
+  if (_predRunning) return;
+  _predRunning = true;
+  const btn = document.getElementById('predSimBtn');
+  if (btn) { btn.textContent = '⏸ Pause'; btn.className = 'pred-sim-btn pred-sim-pause'; }
+  _predTimer = setInterval(pred_tick, 200);
+}
+
+function pred_pause() {
+  _predRunning = false;
+  if (_predTimer) { clearInterval(_predTimer); _predTimer = null; }
+  const btn = document.getElementById('predSimBtn');
+  if (btn) { btn.textContent = '▶ Resume'; btn.className = 'pred-sim-btn pred-sim-start'; }
+}
+
+function pred_reset() {
+  pred_pause();
+  _predSimMin = 0;
+  _predTrailPts = [];
+  if (_predTrailLine) _predTrailLine.setLatLngs([]);
+  const route = PRED_ROUTES[_predRoute];
+  if (_predMarker) _predMarker.setLatLng(route.path[0]);
+  if (_predMap)    _predMap.setView(route.path[0], 13);
+  pred_updateUI(0);
+  const btn = document.getElementById('predSimBtn');
+  if (btn) { btn.textContent = '▶ Start Simulation'; btn.className = 'pred-sim-btn pred-sim-start'; }
+  const devBanner = document.getElementById('predDeviationBanner');
+  if (devBanner) devBanner.style.display = 'none';
+}
+
+function pred_setSpeed(s) {
+  _predSpeed = s;
+  document.querySelectorAll('.pred-spd-btn').forEach(b => b.classList.remove('pred-spd-active'));
+  const el = document.getElementById('predSpd' + s);
+  if (el) el.classList.add('pred-spd-active');
+}
+
+// ── Route switch ──────────────────────────────────────────────────────────
+function pred_selectRoute(routeKey) {
+  _predRoute = routeKey;
+  pred_pause();
+  _predTimings  = pred_buildTimings(routeKey);
+  _predSimMin   = 0;
+  _predTrailPts = [];
+
+  document.getElementById('predTabMorn').className = 'pred-tab' + (routeKey === 'morning' ? ' pred-tab-active' : '');
+  document.getElementById('predTabEve').className  = 'pred-tab' + (routeKey === 'evening' ? ' pred-tab-active' : '');
+
+  // Rebuild map
+  pred_initMap(routeKey);
+  pred_renderHistory(routeKey);
+  pred_updateUI(0);
+
+  // Traffic prediction for 11th day
+  const traffic = pred_predictTraffic(routeKey);
+  const badge   = document.getElementById('predTrafficBadge');
+  if (badge) {
+    badge.textContent  = traffic;
+    badge.className    = 'pred-traffic-badge pred-traffic-' + traffic.toLowerCase();
+  }
+  const note = document.getElementById('predTrafficNote');
+  if (note) note.textContent = `11th day prediction: ${traffic} (mode of 10-day history)`;
+
+  const btn = document.getElementById('predSimBtn');
+  if (btn) { btn.textContent = '▶ Start Simulation'; btn.className = 'pred-sim-btn pred-sim-start'; }
+}
+
+// ── Map setup ─────────────────────────────────────────────────────────────
+function pred_initMap(routeKey) {
+  if (_predMap) { _predMap.remove(); _predMap = null; _predMarker = null; _predPathLine = null; _predTrailLine = null; _predStopMarkers = []; _predSearchMarker = null; }
+
+  const route  = PRED_ROUTES[routeKey];
+  const center = route.path[0];
+
+  _predMap = L.map('predMap', { zoomControl: true, preferCanvas: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(_predMap);
+  _predMap.setView(center, 13);
+
+  // Route path polyline
+  _predPathLine = L.polyline(route.path, {
+    color: route.color, weight: 4, opacity: .5, dashArray: '8 4'
+  }).addTo(_predMap);
+
+  // GPS trail (simulated bus path so far)
+  _predTrailLine = L.polyline([], {
+    color: route.color, weight: 3, opacity: .85
+  }).addTo(_predMap);
+
+  // Stop markers
+  _predStopMarkers = route.stops.map((name, i) => {
+    const pt = route.path[route.stopPathIdx[i]];
+    const isFirst = i === 0, isLast = i === route.stops.length - 1;
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="background:${isFirst||isLast ? route.color : '#21262d'};border:2px solid ${route.color};width:12px;height:12px;border-radius:50%"></div>`,
+      iconSize: [12, 12], iconAnchor: [6, 6],
+    });
+    return L.marker(pt, { icon }).addTo(_predMap).bindTooltip(name, { direction: 'top', permanent: false });
+  });
+
+  // Bus marker
+  const busIcon = L.divIcon({
+    className: '',
+    html: `<div style="font-size:1.6rem;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">🚌</div>`,
+    iconSize: [32, 32], iconAnchor: [16, 28],
+  });
+  _predMarker = L.marker(center, { icon: busIcon }).addTo(_predMap);
+
+  // Fit map to route
+  _predMap.fitBounds(_predPathLine.getBounds(), { padding: [30, 30] });
+}
+
+// ── History table ─────────────────────────────────────────────────────────
+function pred_renderHistory(routeKey) {
+  const hist  = PRED_HISTORY[routeKey];
+  const el    = document.getElementById('predHistTable');
+  if (!el) return;
+  el.innerHTML = hist.map(d => {
+    const total = d.segs.reduce((a, b) => a + b, 0);
+    return `<div class="pred-hist-row">
+      <span class="pred-hist-date">${d.date}</span>
+      <span class="pred-hist-dur">${total} min</span>
+      <span class="pred-hist-traffic-${d.traffic.toLowerCase()}">${d.traffic}</span>
+    </div>`;
+  }).join('') +
+  `<div class="pred-hist-row" style="border-top:1px solid #30363d;margin-top:4px;padding-top:6px">
+    <span style="color:#58a6ff;font-size:.68rem;font-weight:700">11th Day Prediction</span>
+    <span class="pred-hist-dur" style="color:#58a6ff">${Math.round(_predTimings[_predTimings.length-1])} min</span>
+    <span class="pred-hist-traffic-${pred_predictTraffic(routeKey).toLowerCase()}">${pred_predictTraffic(routeKey)}</span>
+  </div>`;
+}
+
+// ── Search stop ───────────────────────────────────────────────────────────
+function pred_search() {
+  const val = (document.getElementById('predSearchIn')?.value || '').trim().toLowerCase();
+  if (!val) return;
+  const route   = PRED_ROUTES[_predRoute];
+  const matched = route.stops.findIndex(s => s.toLowerCase().includes(val));
+  const resEl   = document.getElementById('predSearchResult');
+  const conEl   = document.getElementById('predSearchContent');
+  if (!resEl || !conEl) return;
+
+  if (matched === -1) {
+    resEl.style.display = 'block';
+    conEl.innerHTML = `<div style="color:#f85149;font-size:.78rem">No stop found matching "<b>${val}</b>"</div>`;
+    return;
+  }
+
+  const stopName  = route.stops[matched];
+  const pathIdx   = route.stopPathIdx[matched];
+  const arrMin    = _predTimings[pathIdx];
+  const dep       = route.departure;
+  const absMin    = dep.h * 60 + dep.m + arrMin;
+  const hh        = Math.floor(absMin / 60) % 24;
+  const mm        = Math.floor(absMin % 60);
+  const etaFromNow = Math.max(0, arrMin - _predSimMin);
+  const pt        = route.path[pathIdx];
+
+  resEl.style.display = 'block';
+  conEl.innerHTML = `<div class="pred-search-result-stop">
+    <b>${stopName}</b><br>
+    Predicted arrival: <b>${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}</b><br>
+    ${_predSimMin > 0 ? `ETA from now: <b>${etaFromNow < 1 ? '< 1' : Math.round(etaFromNow)} min</b>` : ''}
+    <br>Segment: Stop ${matched + 1} of ${route.stops.length}
+  </div>`;
+
+  // Pan map and show marker
+  if (_predMap) {
+    _predMap.setView(pt, 15, { animate: true });
+    if (_predSearchMarker) _predSearchMarker.remove();
+    _predSearchMarker = L.marker(pt, {
+      icon: L.divIcon({ className: '', html: `<div style="background:#f59e0b;border:3px solid #fff;width:14px;height:14px;border-radius:50%"></div>`, iconSize:[14,14], iconAnchor:[7,7] })
+    }).addTo(_predMap).bindPopup(`<b>${stopName}</b><br>Predicted: ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`).openPopup();
+  }
+}
+
+// ── View open / close ─────────────────────────────────────────────────────
+function openPrediction() {
+  showV('predictionView');
+  // Init on first open (map needs visible div)
+  setTimeout(() => {
+    _predTimings = pred_buildTimings(_predRoute);
+    pred_initMap(_predRoute);
+    pred_renderHistory(_predRoute);
+    pred_updateUI(0);
+    const traffic = pred_predictTraffic(_predRoute);
+    const badge   = document.getElementById('predTrafficBadge');
+    if (badge) { badge.textContent = traffic; badge.className = 'pred-traffic-badge pred-traffic-' + traffic.toLowerCase(); }
+    pred_setSpeed(30);
+  }, 50);
+}
+
+function leavePrediction() {
+  pred_pause();
+  if (_predMap) { _predMap.remove(); _predMap = null; }
+  showV('homeView');
+}

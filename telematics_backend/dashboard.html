@@ -32,6 +32,7 @@
     </div>
     <div id="backendBadge" style="font-size:.65rem;font-weight:600;color:#fca5a5;white-space:nowrap;margin-left:8px">🔴 Offline</div>
     <button class="bustest-nav-btn" onclick="openBusTest()" title="Open Bus Live Test panel">🚌 Bus Test</button>
+    <button class="bustest-nav-btn pred-nav-btn" onclick="openPrediction()" title="Open Predictive Simulation">🔮 Predict</button>
   </nav>
 
   <div class="hero">
@@ -332,6 +333,94 @@
 
   <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Bus Live Test — ESP32 + A7670C 4G</div>
 </div><!-- /#busTestView -->
+
+<!-- ══════════════════════════════════
+     VIEW 6 — PREDICTIVE SIMULATION
+     Scope: Morning to College + Evening to Home ONLY
+     Do NOT modify Live Bus Test (View 5) above.
+══════════════════════════════════ -->
+<div id="predictionView" class="view">
+
+  <div class="pred-topbar">
+    <button class="back-btn" onclick="leavePrediction()">← Back</button>
+    <div class="pred-title-block">
+      <span class="pred-title">🔮 Predictive Simulation</span>
+      <span class="pred-subtitle">11th Day Prediction · 10-Day Historical Model</span>
+    </div>
+    <div class="pred-route-tabs">
+      <button id="predTabMorn" class="pred-tab pred-tab-active" onclick="pred_selectRoute('morning')">🌅 Morning</button>
+      <button id="predTabEve"  class="pred-tab" onclick="pred_selectRoute('evening')">🌆 Evening</button>
+    </div>
+    <div class="pred-speed-ctrl">
+      <span style="font-size:.65rem;color:#8b949e">Speed:</span>
+      <button class="pred-spd-btn" onclick="pred_setSpeed(10)"  id="predSpd10">10×</button>
+      <button class="pred-spd-btn pred-spd-active" onclick="pred_setSpeed(30)" id="predSpd30">30×</button>
+      <button class="pred-spd-btn" onclick="pred_setSpeed(60)"  id="predSpd60">60×</button>
+    </div>
+  </div>
+
+  <div id="predDeviationBanner" class="pred-deviation-banner" style="display:none">
+    ⚠ Warning: The bus has deviated from the designated route.
+    <button class="pred-dev-close" onclick="this.parentElement.style.display='none'">✕</button>
+  </div>
+
+  <div class="pred-info-bar">
+    <div class="pred-eta-card">
+      <div class="pred-info-lbl">⏱ ETA to Next Stop</div>
+      <div id="predEtaNext" class="pred-eta-val">—</div>
+    </div>
+    <div class="pred-eta-card">
+      <div class="pred-info-lbl">🏁 ETA to Destination</div>
+      <div id="predEtaDest" class="pred-eta-val">—</div>
+    </div>
+    <div class="pred-eta-card">
+      <div class="pred-info-lbl">📍 Next Stop</div>
+      <div id="predNextStop" class="pred-next-val">—</div>
+    </div>
+    <div class="pred-eta-card" style="flex:2;min-width:140px">
+      <div class="pred-info-lbl">📊 Route Progress</div>
+      <div class="pred-prog-w"><div id="predProgBar" class="pred-prog-bar" style="width:0%"></div></div>
+      <div id="predProgTxt" class="pred-prog-txt">Not started</div>
+    </div>
+    <div class="pred-search-wrap">
+      <input id="predSearchIn" class="pred-search-in" placeholder="🔍 Search stop…" onkeydown="if(event.key==='Enter')pred_search()"/>
+      <button class="pred-search-btn" onclick="pred_search()">Go</button>
+    </div>
+  </div>
+
+  <div class="pred-body">
+    <div class="pred-map-col">
+      <div id="predMap"></div>
+      <div class="pred-ctrl-overlay">
+        <button id="predSimBtn" class="pred-sim-btn pred-sim-start" onclick="pred_toggleSim()">▶ Start Simulation</button>
+        <button class="pred-sim-btn pred-sim-reset" onclick="pred_reset()">↺ Reset</button>
+        <div id="predSimClock" class="pred-sim-clock">08:00</div>
+      </div>
+    </div>
+
+    <div class="pred-side">
+      <div class="pred-card">
+        <div class="pred-card-hdr">🚦 Traffic Prediction</div>
+        <div id="predTrafficBadge" class="pred-traffic-badge pred-traffic-medium">Medium</div>
+        <div id="predTrafficNote" class="pred-traffic-note">Based on 10-day historical average</div>
+      </div>
+      <div class="pred-card">
+        <div class="pred-card-hdr">🛑 Stop Progress</div>
+        <div id="predStopList" class="pred-stop-list"></div>
+      </div>
+      <div class="pred-card" id="predSearchResult" style="display:none">
+        <div class="pred-card-hdr">🔍 Search Result</div>
+        <div id="predSearchContent"></div>
+      </div>
+      <div class="pred-card">
+        <div class="pred-card-hdr">📅 10-Day History Summary</div>
+        <div id="predHistTable" class="pred-hist-table"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Predictive Simulation — Historical Route Model</div>
+</div>
 
 <script src="dashboard.js" defer></script>
 </body>
