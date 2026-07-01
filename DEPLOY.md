@@ -64,7 +64,7 @@ Wait for it to resolve before requesting the certificate in Coolify.
 3. **Base Directory:** `/telematics_backend` (the Dockerfile lives here).
 4. **Port / Ports Exposes:** `5000`.
 5. **Domain:** `https://fleet.yourdomain.com` → Coolify auto-provisions Let's
-   Encrypt TLS via Traefik.
+   Encrypt TLS via Traefik.=
 6. **Health check path:** `/health` (optional but recommended).
 
 ## Step 5 — Environment variables (App → Environment Variables)
