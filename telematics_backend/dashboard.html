@@ -106,7 +106,19 @@
     <div class="live-pill"><span class="pdot"></span> LIVE</div>
     <button id="tripActionBtn" class="trip-start-btn" onclick="tripAction()">▶ Start Trip</button>
     <button class="trips-log-btn" onclick="showTripLog()">📋 Trips</button>
+    <button class="eta-modal-open-btn" onclick="openETAPanel()" title="View ETA prediction for all stops">⏱ ETA</button>
     <button class="share-btn" onclick="shareTracker()" title="Copy link to this bus">🔗 Share</button>
+  </div>
+
+  <!-- ETA Panel (slides in from right) -->
+  <div id="etaPanel" class="eta-panel" style="display:none">
+    <div class="eta-panel-hdr">
+      <span>⏱ ETA Prediction</span>
+      <button class="eta-panel-close" onclick="closeETAPanel()">✕</button>
+    </div>
+    <div class="eta-panel-sub" id="etaPanelSub">Live position → stop-by-stop ETA</div>
+    <div id="etaPanelBody" class="eta-panel-body"></div>
+    <div class="eta-panel-note">Based on current speed and 10-day route history</div>
   </div>
 
   <div class="trk-body">

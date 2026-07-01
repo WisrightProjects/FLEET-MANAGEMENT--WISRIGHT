@@ -889,3 +889,111 @@ tbody td b{color:#fafaf9}
   .pred-search-wrap{margin-left:0;width:100%}
   .pred-search-in{width:100%}
 }
+
+/* ── Enhanced per-stop prediction cards ───────────────────────────── */
+.pred-scard{
+  border-radius:7px;border:1px solid #21262d;
+  overflow:hidden;font-size:.75rem;
+  transition:border-color .2s;
+}
+.pred-scard-done   {background:#0a1f10;border-color:#1a3a2a}
+.pred-scard-current{background:#0d2040;border-color:#1f6feb;box-shadow:0 0 0 1px #1f6feb44}
+.pred-scard-pending{background:#0d1117;border-color:#21262d}
+
+.pred-scard-hdr{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 10px;
+  background:rgba(255,255,255,.03);
+}
+.pred-scard-num{
+  width:20px;height:20px;border-radius:50%;
+  background:#21262d;color:#8b949e;
+  font-size:.65rem;font-weight:700;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.pred-scard-done .pred-scard-num{background:#1a3a2a;color:#3fb950}
+.pred-scard-current .pred-scard-num{background:#1f6feb;color:#fff;animation:pred-pulse .9s infinite}
+.pred-scard-name{flex:1;font-weight:600;color:#e6edf3}
+.pred-scard-done .pred-scard-name{color:#8b949e}
+.pred-scard-status{font-size:.65rem;font-weight:600;color:#6b7280;white-space:nowrap}
+.pred-scard-done .pred-scard-status{color:#3fb950}
+.pred-scard-current .pred-scard-status{color:#58a6ff}
+
+.pred-scard-body{padding:6px 10px 8px;display:flex;flex-direction:column;gap:4px}
+.pred-scard-row{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.pred-scard-lbl{font-size:.64rem;color:#6b7280}
+.pred-scard-val{font-size:.72rem;font-weight:600;color:#e6edf3;font-family:'IBM Plex Mono',monospace}
+.pred-scard-hist{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:#8b949e}
+.pred-scard-hist b{color:#58a6ff}
+.pred-eta-blue{color:#58a6ff!important}
+
+/* History table header */
+.pred-hist-hdr-row{
+  display:flex;justify-content:space-between;
+  padding:3px 6px;font-size:.6rem;color:#6b7280;
+  text-transform:uppercase;letter-spacing:.6px;font-weight:600;
+  border-bottom:1px solid #21262d;margin-bottom:3px;
+}
+.pred-hist-pred-row{border-top:1px solid #21262d;margin-top:3px;padding-top:5px}
+
+/* ── ETA Panel (View 3 tracker) ──────────────────────────────────── */
+.eta-modal-open-btn{
+  background:#0d2040;border:1px solid #1f6feb;color:#58a6ff;
+  border-radius:6px;padding:6px 12px;font-size:.75rem;font-weight:700;
+  cursor:pointer;transition:all .15s;white-space:nowrap;
+}
+.eta-modal-open-btn:hover{background:#1f2d45;border-color:#388bfd}
+
+.eta-panel{
+  position:absolute;top:0;right:0;width:300px;height:100%;
+  background:#161b22;border-left:1px solid #30363d;
+  z-index:600;flex-direction:column;
+  box-shadow:-4px 0 20px rgba(0,0,0,.5);
+  overflow:hidden;
+}
+/* trackerView needs position:relative for the panel to anchor */
+#trackerView{position:relative}
+
+.eta-panel-hdr{
+  background:#0d1117;border-bottom:1px solid #30363d;
+  padding:12px 14px;display:flex;align-items:center;justify-content:space-between;
+  font-size:.88rem;font-weight:700;color:#e6edf3;flex-shrink:0;
+}
+.eta-panel-close{background:none;border:none;color:#8b949e;font-size:1.1rem;cursor:pointer;padding:0 2px}
+.eta-panel-close:hover{color:#f85149}
+.eta-panel-sub{padding:8px 14px;font-size:.68rem;color:#8b949e;background:#0d1117;border-bottom:1px solid #21262d;flex-shrink:0}
+.eta-panel-body{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.eta-panel-body::-webkit-scrollbar{width:3px}
+.eta-panel-body::-webkit-scrollbar-thumb{background:#30363d;border-radius:2px}
+.eta-panel-note{padding:8px 14px;font-size:.63rem;color:#6b7280;background:#0d1117;border-top:1px solid #21262d;flex-shrink:0}
+.eta-panel-nodata{text-align:center;color:#6b7280;font-size:.8rem;padding:30px 14px;line-height:1.7}
+
+.eta-stop-card{
+  background:#0d1117;border:1px solid #21262d;border-radius:7px;
+  overflow:hidden;font-size:.75rem;
+}
+.eta-stop-passed{opacity:.5}
+.eta-stop-next{border-color:#1f6feb;background:#0d2040;box-shadow:0 0 0 1px #1f6feb33}
+
+.eta-stop-top{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 10px;background:rgba(255,255,255,.03);
+}
+.eta-stop-num{
+  width:20px;height:20px;border-radius:50%;
+  background:#21262d;color:#8b949e;font-size:.65rem;font-weight:700;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.eta-stop-next .eta-stop-num{background:#1f6feb;color:#fff;animation:pred-pulse .9s infinite}
+.eta-stop-name{flex:1;font-weight:600;color:#e6edf3;font-size:.78rem}
+.eta-stop-time{font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:#58a6ff;white-space:nowrap}
+
+.eta-stop-detail{padding:6px 10px 8px;display:flex;flex-direction:column;gap:3px}
+.eta-detail-row{display:flex;justify-content:space-between;align-items:center}
+.eta-detail-lbl{font-size:.62rem;color:#6b7280}
+.eta-detail-val{font-size:.7rem;font-weight:600;color:#c9d1d9;font-family:'IBM Plex Mono',monospace}
+.eta-blue{color:#58a6ff!important}
+
+@media(max-width:600px){
+  .eta-panel{width:100%;height:60%!important;top:auto;bottom:0;border-left:none;border-top:1px solid #30363d}
+}
