@@ -1222,7 +1222,7 @@ function bustest_setStatus(online, ts) {
   }
   if (lsEl) {
     if (online && ts) {
-      lsEl.textContent = 'Last seen: ' + new Date(ts).toLocaleTimeString();
+      lsEl.textContent = 'Last seen: ' + new Date(ts * 1000).toLocaleTimeString();
     } else {
       lsEl.textContent = 'Waiting for device…';
     }
@@ -1451,6 +1451,49 @@ const PRED_ROUTES = {
     ],
   },
 };
+
+// ── Road-snapped route geometry ────────────────────────────────────────────
+// The hand-placed waypoints above are sparse and connect stop-to-stop with
+// straight lines, which cuts corners and can look like the bus is flying
+// over buildings instead of following the road. On first use of each route
+// we snap it to the real road network via OSRM's public routing API and
+// replace route.path / route.stopPathIdx with the dense, road-following
+// geometry. If the request fails (offline, blocked, etc.) we fall back to
+// the original hand-placed waypoints so the simulation still works.
+const _PRED_ORIG = JSON.parse(JSON.stringify(PRED_ROUTES));
+const _predRoadCache = {};
+
+async function pred_fetchRoadPath(routeKey) {
+  if (_predRoadCache[routeKey]) return _predRoadCache[routeKey];
+  const orig = _PRED_ORIG[routeKey];
+  const stopPts = orig.stopPathIdx.map(i => orig.path[i]); // [lat,lon] per stop
+  const coordStr = stopPts.map(p => `${p[1]},${p[0]}`).join(';'); // OSRM wants lon,lat
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) throw new Error('bad status');
+    const d = await r.json();
+    if (d.code !== 'Ok' || !d.routes || !d.routes[0]) throw new Error('no route');
+    const path = d.routes[0].geometry.coordinates.map(c => [c[1], c[0]]); // -> [lat,lon]
+
+    // Map each original stop to the nearest point on the new dense road path
+    const stopPathIdx = stopPts.map(sp => {
+      let best = 0, bestD = Infinity;
+      path.forEach((p, i) => {
+        const dd = (p[0] - sp[0]) ** 2 + (p[1] - sp[1]) ** 2;
+        if (dd < bestD) { bestD = dd; best = i; }
+      });
+      return best;
+    });
+
+    const result = { path, stopPathIdx };
+    _predRoadCache[routeKey] = result;
+    return result;
+  } catch {
+    // Offline / blocked — keep the straight-line fallback
+    return { path: orig.path, stopPathIdx: orig.stopPathIdx };
+  }
+}
 
 // ── 10-day historical segment times (minutes per stop-to-stop segment) ─────
 // segs[i] = travel time (min) for segment i (stop[i] → stop[i+1])
@@ -1785,15 +1828,23 @@ function pred_setSpeed(s) {
 }
 
 // ── Route switch ──────────────────────────────────────────────────────────
-function pred_selectRoute(routeKey) {
+async function pred_selectRoute(routeKey) {
   _predRoute = routeKey;
   pred_pause();
-  _predTimings  = pred_buildTimings(routeKey);
   _predSimMin   = 0;
   _predTrailPts = [];
 
   document.getElementById('predTabMorn').className = 'pred-tab' + (routeKey === 'morning' ? ' pred-tab-active' : '');
   document.getElementById('predTabEve').className  = 'pred-tab' + (routeKey === 'evening' ? ' pred-tab-active' : '');
+
+  // Snap to real roads (falls back to straight waypoints if offline)
+  const roadData = await pred_fetchRoadPath(routeKey);
+  PRED_ROUTES[routeKey].path        = roadData.path;
+  PRED_ROUTES[routeKey].stopPathIdx = roadData.stopPathIdx;
+  _predTimings = pred_buildTimings(routeKey);
+
+  // Bail out if the user switched routes again while we were fetching
+  if (_predRoute !== routeKey) return;
 
   // Rebuild map
   pred_initMap(routeKey);
@@ -1856,7 +1907,9 @@ function pred_initMap(routeKey) {
   });
   _predMarker = L.marker(center, { icon: busIcon }).addTo(_predMap);
 
-  // Fit map to route
+  // Fit map to route — invalidateSize first in case the container was
+  // resized/hidden since Leaflet last measured it (avoids a grey blank map)
+  _predMap.invalidateSize();
   _predMap.fitBounds(_predPathLine.getBounds(), { padding: [30, 30] });
 }
 
@@ -2030,15 +2083,24 @@ setInterval(() => {
 // ── View open / close ─────────────────────────────────────────────────────
 function openPrediction() {
   showV('predictionView');
-  // Always re-init: div needs to be visible before Leaflet can measure its size
-  setTimeout(() => {
+  // Wait two animation frames so the view is actually laid out (display:
+  // none -> block) before Leaflet measures the container — a single
+  // setTimeout(80) is not reliable and was leaving predMap with 0 height,
+  // which renders as an empty grey Leaflet container.
+  requestAnimationFrame(() => requestAnimationFrame(async () => {
     pred_pause();
     _predSimMin   = 0;
     _predTrailPts = [];
-    _predTimings  = pred_buildTimings(_predRoute);
+
+    const roadData = await pred_fetchRoadPath(_predRoute);
+    PRED_ROUTES[_predRoute].path        = roadData.path;
+    PRED_ROUTES[_predRoute].stopPathIdx = roadData.stopPathIdx;
+    _predTimings = pred_buildTimings(_predRoute);
+
     pred_initMap(_predRoute);
     pred_renderHistory(_predRoute);
     pred_updateUI(0);
+    if (_predMap) _predMap.invalidateSize();
     const traffic = pred_predictTraffic(_predRoute);
     const badge   = document.getElementById('predTrafficBadge');
     if (badge) { badge.textContent = traffic; badge.className = 'pred-traffic-badge pred-traffic-' + traffic.toLowerCase(); }
@@ -2047,7 +2109,7 @@ function openPrediction() {
     pred_setSpeed(30);
     const btn = document.getElementById('predSimBtn');
     if (btn) { btn.textContent = '▶ Start Simulation'; btn.className = 'pred-sim-btn pred-sim-start'; }
-  }, 80);
+  }));
 }
 
 function leavePrediction() {
