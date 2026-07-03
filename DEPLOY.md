@@ -119,27 +119,39 @@ curl -X POST https://fleet.yourdomain.com/routes/config \
 
 ## Step 8 — Point the ESP32 at your domain
 
-Edit `BusTracking/ESP32/bus_final/bus_final.ino`:
+Use **`BusTracking/ESP32/bus_sim_4g/bus_sim_4g.ino`** — the 4G production build
+that posts straight to your domain (no ngrok), with the hardened A7670C
+data bring-up (APN-before-attach, `AT+CNMP`, real-IP gate) and the GPIO32 SOS
+button. Edit its config block:
 
 ```cpp
-// line 61 — swap the ngrok host for your subdomain (NO https://, NO trailing slash)
-#define NGROK_HOST    "fleet.yourdomain.com"
+// point at your subdomain (NO https://, NO trailing slash)
+#define SERVER_HOST   "fleet.yourdomain.com"
 
-// line 67 — must equal DEVICE_TOKEN set in Coolify
+// must equal DEVICE_TOKEN set in Coolify
 #define DEVICE_TOKEN  "<the same long random token>"
+
+// your SIM's carrier APN (fallbacks are tried automatically)
+#define SIM_APN       "www.vodafone.net.in"
 ```
 
 Then reflash from the Arduino IDE (Board: *ESP32 Dev Module*, 115200 baud
 serial). No other firmware changes are needed:
 
-- The firmware already POSTs over **HTTPS to port 443** (`https://<host>/telemetry`).
-- Its TLS is set to accept the server cert without pinning
-  (`AT+CSSLCFG "authmode",0,0`), so Coolify's Let's Encrypt cert works as-is.
-- The leftover `ngrok-skip-browser-warning` header it sends is harmless against
-  a real domain (optional cleanup: remove it in `http_post()`).
+- It POSTs over **HTTPS to port 443** (`https://<host>/telemetry`).
+- TLS accepts the server cert without pinning (`AT+CSSLCFG "authmode",0,0`), so
+  Coolify's Let's Encrypt cert works as-is.
 
-On the Serial Monitor you should see `[HTTP] POST OK  HTTP 201`, and the bus
-appears live on the dashboard.
+> The older `bus_final/bus_final.ino` is the **ngrok** variant (set `NGROK_HOST`
+> instead of `SERVER_HOST`). It carries the same A7670C data fixes but is aimed
+> at a local ngrok tunnel rather than a real domain — prefer `bus_sim_4g` for a
+> Coolify/VPS deployment.
+
+On the Serial Monitor you should see `[SIM] Local IP: <addr> [DATA ONLINE]`
+followed by `[HTTP] POST OK  HTTP 201`, and the bus appears live on the
+dashboard. If registration stalls at `CS:wait PS:wait` with good signal, the
+SIM isn't registering on the network (RAT/operator/account) — a firmware host
+change won't help until the SIM itself gets data.
 
 ---
 
