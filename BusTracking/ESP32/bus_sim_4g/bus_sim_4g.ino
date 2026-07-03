@@ -1,66 +1,76 @@
 /*
   ╔═══════════════════════════════════════════════════════════════╗
-  ║          BusTracker — Production ESP32 Firmware              ║
-  ║   NEO-6M GPS + SIMCom A7670C 4G LTE + VI Vodafone SIM       ║
+  ║          BusTracker — Production ESP32 Firmware               ║
+  ║   NEO-6M GPS + SIMCom A7670C 4G LTE + SOS push button          ║
   ╠═══════════════════════════════════════════════════════════════╣
-  ║  WIRING                                                       ║
-  ║  ─────────────────────────────────────────────────────────   ║
-  ║  NEO-6M  TX  →  ESP32 GPIO 16  (GPS_RX_PIN)                 ║
-  ║  NEO-6M  RX  →  ESP32 GPIO 17  (GPS_TX_PIN, optional)       ║
-  ║  NEO-6M  VCC →  3.3 V                                        ║
-  ║  NEO-6M  GND →  GND                                          ║
-  ║                                                               ║
-  ║  A7670C  TX  →  ESP32 GPIO 26  (SIM_RX_PIN)                 ║
-  ║  A7670C  RX  →  ESP32 GPIO 27  (SIM_TX_PIN)                 ║
-  ║  A7670C  RST →  ESP32 GPIO  4  (SIM_RST_PIN, optional)      ║
-  ║  A7670C  VCC →  5 V  (dedicated 2 A supply recommended)      ║
-  ║  A7670C  GND →  GND  (shared with ESP32)                     ║
-  ║                                                               ║
-  ║  SOS Button: GPIO 0 (Boot button) → hold to trigger SOS      ║
+  ║  WIRING                                                        ║
+  ║  ─────────────────────────────────────────────────────────    ║
+  ║  NEO-6M  TX  →  ESP32 GPIO 16  (GPS_RX_PIN)                   ║
+  ║  NEO-6M  RX  →  ESP32 GPIO 17  (GPS_TX_PIN, optional)         ║
+  ║  NEO-6M  VCC →  3.3 V                                         ║
+  ║  NEO-6M  GND →  GND                                           ║
+  ║                                                                ║
+  ║  A7670C  TX  →  ESP32 GPIO 26  (SIM_RX_PIN)                   ║
+  ║  A7670C  RX  →  ESP32 GPIO 27  (SIM_TX_PIN)                   ║
+  ║  A7670C  RST →  ESP32 GPIO  4  (SIM_RST_PIN, optional)        ║
+  ║  A7670C  VCC →  5 V  (dedicated 2 A supply required — the      ║
+  ║                       module browns out on ESP32/USB 5V and    ║
+  ║                       drops registration mid-attach)           ║
+  ║  A7670C  GND →  GND  (shared with ESP32)                      ║
+  ║                                                                ║
+  ║  SOS Button: one leg → ESP32 GPIO 32, other leg → GND          ║
+  ║              (internal pull-up used — press = LOW = SOS)       ║
+  ║              (external momentary push button — not the boot   ║
+  ║               button; GPIO32 is a free input-capable pin)      ║
   ╠═══════════════════════════════════════════════════════════════╣
-  ║  Libraries (Arduino IDE → Library Manager):                   ║
-  ║    TinyGPSPlus  by Mikal Hart       (>= 1.0.3)              ║
-  ║    ArduinoJson  by Benoit Blanchon  (v6 or v7)               ║
+  ║  Libraries (Arduino IDE → Library Manager):                    ║
+  ║    TinyGPSPlus  by Mikal Hart       (>= 1.0.3)                ║
+  ║    ArduinoJson  by Benoit Blanchon  (v6 or v7)                ║
   ╠═══════════════════════════════════════════════════════════════╣
-  ║  Board: ESP32 Dev Module  |  Upload Speed: 921600            ║
-  ║  CPU: 240 MHz  |  Flash: 4 MB  |  Partition: Default         ║
+  ║  Board: ESP32 Dev Module  |  Upload Speed: 921600              ║
+  ║  CPU: 240 MHz  |  Flash: 4 MB  |  Partition: Default           ║
   ╚═══════════════════════════════════════════════════════════════╝
 
-  NGROK SETUP (one-time):
+  PURPOSE
   ──────────────────────────────────────────────────────────────
-  1. Sign up free at https://ngrok.com
-  2. Copy your Authtoken from https://dashboard.ngrok.com/auth
-  3. Paste it in telematics_backend/.env  →  NGROK_AUTHTOKEN=xxx
-  4. Run:  python telematics_backend/app.py
-  5. The terminal will print:
-       ESP32 endpoint: https://XXXX.ngrok-free.app/telemetry
-  6. Copy ONLY the hostname (e.g. "abc123.ngrok-free.app")
-     and paste it below as NGROK_HOST.
-  7. Free tier: hostname changes on every server restart — repeat step 6.
-     Paid tier ($10/mo): reserve a static domain — set once, never change.
+  Production build: ESP32 gets its internet purely from the SIMCom
+  A7670C 4G module (no WiFi at all) and POSTs GPS + SOS telemetry
+  straight to the hosted backend at https://fms.wisright.com/telemetry.
+  Pressing the SOS push button sets sos_active=1 in every packet sent
+  until the button is pressed again to clear it — the dashboard shows
+  a live SOS alert banner/marker the moment a sos_active=1 packet lands.
+
+  CELLULAR DATA BRING-UP (why SMS can work but the website won't)
+  ──────────────────────────────────────────────────────────────
+  A SIM registers on two separate networks:
+    CS (circuit-switched) → voice + SMS
+    PS (packet-switched)  → internet / data
+  SMS working proves the module, antenna, coverage and SIM are fine;
+  it says nothing about data. This firmware:
+    - defines the APN (CGDCONT) BEFORE attaching (CGATT) — VI rejects
+      the data session otherwise;
+    - forces auto network mode (CNMP) so PS registration completes;
+    - trusts data only after a real, non-zero local IP (CGPADDR),
+      not the bare "OK" from CGACT.
+  If it still fails: put the SIM in a phone with WiFi OFF and try to
+  browse — no data there means the SIM's data plan is the problem,
+  and no firmware change will fix it.
 
   Data flow:
     NEO-6M GPS --> ESP32 UART2 --> build JSON --> UART1 --> A7670C 4G
-    --> VI Vodafone LTE --> Internet --> ngrok HTTPS --> Flask /telemetry
-    --> MySQL --> Dashboard Leaflet map
+    --> mobile network --> Internet --> HTTPS --> fms.wisright.com/telemetry
+    --> MySQL --> Dashboard (live map + SOS alert banner)
 */
 
 #include <TinyGPSPlus.h>
 #include <ArduinoJson.h>
-#include <WiFi.h>
-#include <WebServer.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USER CONFIGURATION  <-- Edit these before uploading
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Paste the ngrok hostname here AFTER starting the Flask server.
-// Example: "a1b2c3d4.ngrok-free.app"
-// HOW TO FIND IT: run  python app.py  and look for the line:
-//   ESP32 endpoint: https://<THIS_PART>.ngrok-free.app/telemetry
-#define NGROK_HOST    "haphazard-lanky-oxidant.ngrok-free.dev"
-
-// Backend route — must match Flask endpoint
+// Hosted backend — no ngrok needed
+#define SERVER_HOST   "fms.wisright.com"
 #define SERVER_PATH   "/telemetry"
 
 // Auth token — must match DEVICE_TOKEN in server .env
@@ -69,13 +79,12 @@
 // Unique ID shown on the dashboard for this physical bus
 #define BUS_ID        "BUS01"
 
-// VI (Vodafone Idea) India APN (fallbacks tried automatically)
-#define SIM_APN    "www.vodafone.net.in"
+// SIM phone number (MSISDN) — label only, for logs/identification
+#define SIM_NUMBER    "8608980556"
 
-// Local Wi-Fi AP for the test panel (connect phone/PC to this network)
-// Open http://192.168.4.1 in browser after connecting
-#define AP_SSID   "BusTracker-Panel"
-#define AP_PASS   "bustrack8"       // min 8 chars
+// SIM APN — VI (Vodafone Idea) India (fallbacks tried automatically)
+// NOTE: an APN is NOT a URL — do not test it in a browser.
+#define SIM_APN       "www.vodafone.net.in"
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  HARDWARE PINS
@@ -85,7 +94,7 @@
 #define GPS_TX_PIN    17   // ESP32 -> NEO-6M RX
 #define SIM_RX_PIN    26   // ESP32 <- A7670C TX
 #define SIM_TX_PIN    27   // ESP32 -> A7670C RX
-// SIM_RST_PIN and SOS_BTN_PIN not connected — both disabled
+#define SOS_BTN_PIN   32   // External push button: pin -> GND, internal pull-up used
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  BAUD RATES
@@ -103,9 +112,8 @@
 #define GPS_FIX_TIMEOUT_MS   120000UL  // Wait up to 2 min for first fix
 #define AT_TIMEOUT_MS          5000UL  // Generic AT command timeout
 #define HTTP_TIMEOUT_MS       35000UL  // AT+HTTPACTION wait timeout
-#define SIM_REINIT_DELAY_MS   15000UL  // Pause before re-init on failure
-#define SOS_AUTO_CLEAR_MS     30000UL  // Auto-clear SOS after 30 s
 #define STATUS_PRINT_MS        5000UL  // How often to print live status line
+#define SOS_DEBOUNCE_MS         300UL  // Button debounce window
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  HARDWARE SERIALS
@@ -119,7 +127,6 @@ HardwareSerial simSerial(1);  // UART1: RX=GPIO26, TX=GPIO27
 // ─────────────────────────────────────────────────────────────────────────────
 
 TinyGPSPlus gps;
-WebServer    apServer(80);
 
 struct GpsSnapshot {
   double   lat;
@@ -136,8 +143,9 @@ struct GpsSnapshot {
 static GpsSnapshot snap         = {};
 static bool        networkReady = false;
 static bool        sosActive    = false;
+static bool        sosBtnLast   = HIGH;
+static uint32_t    sosLastEdgeMs = 0;
 static uint32_t    lastSendMs   = 0;
-static uint32_t    lastSosMs    = 0;
 static uint32_t    lastStatusMs = 0;
 static uint8_t     errCount     = 0;
 static uint32_t    sendCount    = 0;   // total successful POSTs this session
@@ -149,8 +157,6 @@ static uint32_t    sendCount    = 0;   // total successful POSTs this session
 #define LOG(x)    Serial.print(x)
 #define LOGLN(x)  Serial.println(x)
 #define LOGF(...) Serial.printf(__VA_ARGS__)
-
-// Print a divider line to make sections easy to spot in Serial Monitor
 #define DIVIDER() Serial.println(F("--------------------------------------------"))
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -162,14 +168,9 @@ void printLiveStatus() {
   LOGF("[STATUS] Uptime: %lu s  |  Sends OK: %lu  |  Errors: %d\n",
        millis() / 1000, sendCount, errCount);
 
-  // Network
-  if (networkReady) {
-    LOGLN(F("[NET]    4G: CONNECTED  -- A7670C online"));
-  } else {
-    LOGLN(F("[NET]    4G: OFFLINE    -- waiting for re-init"));
-  }
+  LOGLN(networkReady ? F("[NET]    4G: CONNECTED  -- A7670C online")
+                      : F("[NET]    4G: OFFLINE    -- waiting for re-init"));
 
-  // GPS
   if (snap.valid) {
     LOGF("[GPS]    FIX OK  Lat=%.6f  Lon=%.6f\n", snap.lat, snap.lon);
     LOGF("[GPS]            Speed=%.1f km/h  Alt=%.1f m  Sats=%lu  HDOP=%.2f\n",
@@ -183,12 +184,33 @@ void printLiveStatus() {
     }
   }
 
-  // SOS
-  if (sosActive) {
-    LOGLN(F("[SOS]    *** SOS ACTIVE *** hold button to maintain"));
-  }
+  LOGF("[SOS]    Button state: %s\n", sosActive ? "*** TRIGGERED ***" : "armed / safe");
 
   DIVIDER();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  SOS BUTTON — press to toggle, debounced
+// ═════════════════════════════════════════════════════════════════════════════
+
+void sos_setup() {
+  pinMode(SOS_BTN_PIN, INPUT_PULLUP);
+}
+
+void sos_poll() {
+  bool reading = digitalRead(SOS_BTN_PIN);
+  uint32_t now = millis();
+
+  if (reading != sosBtnLast && (now - sosLastEdgeMs) > SOS_DEBOUNCE_MS) {
+    sosLastEdgeMs = now;
+    sosBtnLast    = reading;
+    if (reading == LOW) {   // button pressed (active LOW, pull-up)
+      sosActive = !sosActive;
+      DIVIDER();
+      LOGF("[SOS]    Button pressed — SOS now %s\n", sosActive ? "*** ACTIVE ***" : "CLEARED");
+      DIVIDER();
+    }
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -201,7 +223,6 @@ void gps_feed() {
   }
 }
 
-// Block until valid GPS fix or timeout. Prints a progress line every 5 s.
 bool gps_waitForFix(uint32_t timeoutMs) {
   DIVIDER();
   LOGLN(F("[GPS] Searching for satellites..."));
@@ -214,8 +235,8 @@ bool gps_waitForFix(uint32_t timeoutMs) {
 
   while (millis() - start < timeoutMs) {
     gps_feed();
+    sos_poll();
 
-    // Warn once if NEO-6M is sending nothing at all
     if (!warnedNoBytes && millis() - start > 5000 && gps.charsProcessed() == 0) {
       warnedNoBytes = true;
       LOGLN(F("[GPS] WARNING: No bytes from NEO-6M after 5 s"));
@@ -252,13 +273,11 @@ bool gps_waitForFix(uint32_t timeoutMs) {
   return false;
 }
 
-// Snapshot latest fix into snap struct. Returns false if stale or invalid.
 bool gps_snapshot() {
   gps_feed();
 
   if (!gps.location.isValid() || gps.location.age() > 5000) {
     if (snap.valid) {
-      // Lost fix that we previously had — warn once
       LOGLN(F("[GPS] Fix lost — location data is stale (>5 s old)"));
     }
     snap.valid = false;
@@ -346,13 +365,6 @@ String sim_sendCapture(const char* cmd, uint32_t timeoutMs = AT_TIMEOUT_MS) {
   return resp;
 }
 
-void sim_hardReset() {
-  // No reset pin connected — just wait for module to self-recover
-  LOGLN(F("[SIM] Waiting 5 s for module to recover (no reset pin connected)..."));
-  delay(5000);
-  sim_clearRx();
-}
-
 bool sim_isAlive() {
   sim_clearRx();
   simSerial.print(F("AT\r\n"));
@@ -386,17 +398,106 @@ void sim_logSignal() {
                           (rssi >= 10) ? "FAIR"      :
                           (rssi >=  5) ? "POOR"      : "NO SIGNAL";
     LOGF("[SIM] Signal: CSQ=%d  %d dBm  [%s]\n", rssi, dbm, quality);
+  } else {
+    LOGLN(F("[SIM] Signal: no +CSQ response"));
   }
 }
 
+// ─── Extract a quoted or trimmed value after a token in an AT response ────────
+static String at_extractLine(const String& resp, const char* token) {
+  int idx = resp.indexOf(token);
+  if (idx == -1) return String();
+  int start = idx + strlen(token);
+  int end   = resp.indexOf('\n', start);
+  String line = (end != -1) ? resp.substring(start, end) : resp.substring(start);
+  line.trim();
+  return line;
+}
+
+// Print the module's IMEI (unique modem serial — identifies this A7670C)
+void sim_logIMEI() {
+  // AT+CGSN returns the raw 15-digit IMEI on its own line
+  String r = sim_sendCapture("AT+CGSN");
+  r.replace("AT+CGSN", "");
+  r.replace("OK", "");
+  r.replace("\r", "");
+  r.trim();
+  // Keep only the first non-empty line (the digits)
+  int nl = r.indexOf('\n');
+  String imei = (nl != -1) ? r.substring(0, nl) : r;
+  imei.trim();
+  if (imei.length() >= 14) {
+    LOGF("[SIM] IMEI: %s\n", imei.c_str());
+  } else {
+    LOGLN(F("[SIM] IMEI: unavailable"));
+  }
+}
+
+// Print the currently configured APN (context 1) and its connection status
+void sim_logAPN() {
+  // Configured APN (what we asked the network for)
+  String defc = sim_sendCapture("AT+CGDCONT?");
+  String cfgApn = at_extractLine(defc, "+CGDCONT: 1,");
+  if (cfgApn.length()) {
+    LOGF("[SIM] APN config (CGDCONT): %s\n", cfgApn.c_str());
+  }
+
+  // Negotiated / active APN parameters from the network (only present if PDP up)
+  String rdp = sim_sendCapture("AT+CGCONTRDP");
+  String rdpApn = at_extractLine(rdp, "+CGCONTRDP:");
+  if (rdpApn.length()) {
+    LOGF("[SIM] APN active  (CGCONTRDP): %s\n", rdpApn.c_str());
+    LOGLN(F("[SIM] APN connection: OK (network accepted the APN)"));
+  } else {
+    LOGLN(F("[SIM] APN connection: NOT active (no CGCONTRDP — data context down)"));
+  }
+}
+
+// Print the local IP address assigned to this SIM by the carrier.
+// A valid, non-zero IP here is proof the mobile-data connection really works.
+bool sim_logLocalIP() {
+  String r  = sim_sendCapture("AT+CGPADDR=1");
+  int    idx = r.indexOf(F("+CGPADDR:"));
+  String ip;
+  if (idx != -1) {
+    String line = at_extractLine(r, "+CGPADDR:");
+    int comma = line.indexOf(',');
+    if (comma != -1) ip = line.substring(comma + 1);
+    ip.replace("\"", "");
+    ip.trim();
+  }
+  bool hasIp = ip.length() > 0 && ip != "0.0.0.0";
+  if (hasIp) {
+    LOGF("[SIM] Local IP: %s  [DATA ONLINE]\n", ip.c_str());
+  } else {
+    LOGLN(F("[SIM] Local IP: none (0.0.0.0) — cellular DATA is NOT connected"));
+    LOGLN(F("[SIM]   -> SIM registers for voice/SMS but has no data/APN session."));
+    LOGLN(F("[SIM]   -> Check: data plan active, correct APN, PS registration, coverage."));
+  }
+  return hasIp;
+}
+
+// One-shot connectivity report: IMEI, signal, APN, local IP.
+// Call after data-context activation to see exactly why cellular data fails.
+void sim_logConnectivity() {
+  DIVIDER();
+  LOGLN(F("[SIM] ===== CELLULAR CONNECTIVITY REPORT ====="));
+  LOGF("[SIM] SIM number: %s\n", SIM_NUMBER);
+  sim_logIMEI();
+  sim_logSignal();
+  sim_logAPN();
+  sim_logLocalIP();
+  LOGLN(F("[SIM] ========================================"));
+  DIVIDER();
+}
+
 bool sim_waitRegistered(uint32_t timeoutMs = 90000) {
-  LOGLN(F("[SIM] Waiting for VI network registration (CS + PS)..."));
+  LOGLN(F("[SIM] Waiting for network registration (CS + PS)..."));
   uint32_t start = millis();
 
   bool csOk = false, psOk = false;
 
   while (millis() - start < timeoutMs) {
-    // CS registration (voice/SMS) — AT+CREG
     if (!csOk) {
       String rc = sim_sendCapture("AT+CREG?");
       if (rc.indexOf(F(",1")) != -1 || rc.indexOf(F(",5")) != -1) {
@@ -405,7 +506,6 @@ bool sim_waitRegistered(uint32_t timeoutMs = 90000) {
       }
     }
 
-    // PS registration (LTE data) — try AT+CEREG first (LTE), fallback AT+CGREG (GPRS)
     if (!psOk) {
       String re = sim_sendCapture("AT+CEREG?");
       if (re.indexOf(F(",1")) != -1 || re.indexOf(F(",5")) != -1) {
@@ -429,34 +529,17 @@ bool sim_waitRegistered(uint32_t timeoutMs = 90000) {
   }
 
   LOGLN(F("[SIM] Registration TIMEOUT"));
-  if (!csOk) LOGLN(F("[SIM] CS failed — check SIM inserted, VI coverage, antenna"));
+  if (!csOk) LOGLN(F("[SIM] CS failed — check SIM inserted, carrier coverage, antenna"));
   if (!psOk) LOGLN(F("[SIM] PS failed — data won't work even though calls/SMS may work"));
-  // Allow proceed if at least CS registered — data may still come up
   return csOk;
-}
-
-// Returns true only if the carrier has assigned a real (non-zero) IP — the
-// one reliable proof that cellular DATA (not just voice/SMS) is actually up.
-bool sim_hasDataIP() {
-  String r = sim_sendCapture("AT+CGPADDR=1", 5000);
-  int idx = r.indexOf(F("+CGPADDR:"));
-  if (idx == -1) return false;
-  int comma = r.indexOf(',', idx);
-  if (comma == -1) return false;
-  String ip = r.substring(comma + 1);
-  ip.replace("\"", ""); ip.replace("\r", ""); ip.replace("\n", "");
-  ip.trim();
-  bool ok = ip.length() > 0 && ip != "0.0.0.0";
-  if (ok) LOGF("[SIM] Local IP: %s  [DATA ONLINE]\n", ip.c_str());
-  else    LOGLN(F("[SIM] Local IP: none (0.0.0.0) — cellular DATA not connected"));
-  return ok;
 }
 
 bool sim_activateDataContext() {
   // Define the PDP context (APN) BEFORE attaching. On VI Vodafone, attaching
   // with a blank/default context first makes the network reject the data
-  // session — SMS/voice still work but you never get an IP.
-  const char* apns[] = { SIM_APN, "vodafone", "portalnmms", "internet", nullptr };
+  // session — SMS/voice still work but you never get an IP. Trust data only
+  // after a real, non-zero local IP (not the bare "OK" from CGACT).
+  const char* apns[] = { SIM_APN, "internet", "www", nullptr };
 
   for (int i = 0; apns[i] != nullptr; i++) {
     LOGF("[SIM] Trying APN: %s\n", apns[i]);
@@ -481,8 +564,8 @@ bool sim_activateDataContext() {
       continue;
     }
 
-    // Trust only a real, non-zero IP — not the "OK" from CGACT
-    if (sim_hasDataIP()) {
+    // The ONLY reliable proof of data: a real, non-zero local IP
+    if (sim_logLocalIP()) {
       LOGF("[SIM] Data ACTIVE with real IP — APN: %s\n", apns[i]);
       return true;
     }
@@ -506,10 +589,11 @@ bool sim_initialize() {
   DIVIDER();
 
   if (!sim_isAlive()) {
-    LOGLN(F("[SIM] Module not responding — attempting hard reset"));
-    sim_hardReset();
+    LOGLN(F("[SIM] Module not responding — waiting 5 s for recovery..."));
+    delay(5000);
+    sim_clearRx();
     if (!sim_isAlive()) {
-      LOGLN(F("[SIM] FATAL: Module unresponsive after reset"));
+      LOGLN(F("[SIM] FATAL: Module unresponsive"));
       LOGLN(F("[SIM] Check: 5V power supply, GND shared with ESP32, TX/RX wiring"));
       return false;
     }
@@ -526,13 +610,20 @@ bool sim_initialize() {
   if (!sim_waitRegistered())     return false;
   sim_logSignal();
   sim_configureSsl();
-  if (!sim_activateDataContext()) return false;
+  if (!sim_activateDataContext()) {
+    // Data context failed — dump full diagnostics so the cause is visible
+    sim_logConnectivity();
+    return false;
+  }
+
+  // Data context reports active — confirm with a real local IP before trusting it
+  sim_logConnectivity();
 
   networkReady = true;
   errCount     = 0;
   DIVIDER();
   LOGLN(F("[SIM] A7670C READY -- 4G internet active"));
-  LOGF("[SIM] Endpoint: https://%s%s\n", NGROK_HOST, SERVER_PATH);
+  LOGF("[SIM] Endpoint: https://%s%s\n", SERVER_HOST, SERVER_PATH);
   DIVIDER();
   return true;
 }
@@ -563,7 +654,7 @@ int buildPayload(char* buf, int bufLen, bool sos) {
 
 bool http_post(const char* payload, int payloadLen) {
   LOGF("[HTTP] Sending %d bytes to https://%s%s\n",
-       payloadLen, NGROK_HOST, SERVER_PATH);
+       payloadLen, SERVER_HOST, SERVER_PATH);
 
   sim_sendExpect("AT+HTTPTERM", "OK", 4000);
   delay(300);
@@ -580,7 +671,7 @@ bool http_post(const char* payload, int payloadLen) {
 
   char urlCmd[320];
   snprintf(urlCmd, sizeof(urlCmd),
-           "AT+HTTPPARA=\"URL\",\"https://%s%s\"", NGROK_HOST, SERVER_PATH);
+           "AT+HTTPPARA=\"URL\",\"https://%s%s\"", SERVER_HOST, SERVER_PATH);
   if (!sim_sendExpect(urlCmd, "OK", 5000)) {
     LOGLN(F("[HTTP] Set URL failed"));
     sim_sendExpect("AT+HTTPTERM", "OK", 2000); return false;
@@ -593,11 +684,10 @@ bool http_post(const char* payload, int payloadLen) {
   // Link SSL profile 0 to HTTP (required for HTTPS on A7670C)
   sim_sendExpect("AT+HTTPPARA=\"SSLCFG\",0", "OK", 3000);
 
-  // Send auth token + ngrok browser-warning bypass header
-  char hdrCmd[200];
+  // Send auth token header
+  char hdrCmd[160];
   snprintf(hdrCmd, sizeof(hdrCmd),
-           "AT+HTTPPARA=\"USERDATA\",\"Token: %s\\r\\nngrok-skip-browser-warning: true\"",
-           DEVICE_TOKEN);
+           "AT+HTTPPARA=\"USERDATA\",\"Token: %s\"", DEVICE_TOKEN);
   sim_sendExpect(hdrCmd, "OK");
 
   char dataCmd[48];
@@ -655,7 +745,6 @@ bool http_post(const char* payload, int payloadLen) {
   }
 
   String serverReply = sim_sendCapture("AT+HTTPREAD", 5000);
-  // Strip AT echo lines, print just the body
   int bodyStart = serverReply.indexOf("\r\n\r\n");
   if (bodyStart == -1) bodyStart = serverReply.indexOf("+HTTPREAD:");
   if (bodyStart != -1)
@@ -671,22 +760,11 @@ bool http_post(const char* payload, int payloadLen) {
     LOGF("[HTTP] POST FAILED  HTTP %d\n", httpCode);
     if (httpCode == 401 || httpCode == 403) {
       LOGLN(F("[HTTP] Auth error — check DEVICE_TOKEN matches server .env"));
-    } else if (httpCode == 307) {
-      LOGLN(F("[HTTP] ngrok redirect — ngrok-skip-browser-warning header may be malformed"));
     } else if (httpCode == -1) {
-      LOGLN(F("[HTTP] No response — check NGROK_HOST is correct and server is running"));
+      LOGLN(F("[HTTP] No response — check SERVER_HOST is correct and server is running"));
     }
   }
   return success;
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SOS BUTTON
-// ═════════════════════════════════════════════════════════════════════════════
-
-void sos_poll() {
-  // SOS button not connected — sosActive stays false
-  // (can be set manually in code if needed later)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -700,18 +778,19 @@ void telemetry_send() {
     return;
   }
 
-  sos_poll();
-
-  // Print current coordinates before sending
-  LOGF("[MAIN] Sending: Lat=%.6f  Lon=%.6f  Speed=%.1f km/h  Sats=%lu\n",
-       snap.lat, snap.lon, snap.speed_kmh, snap.satellites);
+  LOGF("[MAIN] Sending: Lat=%.6f  Lon=%.6f  Speed=%.1f km/h  Sats=%lu  SOS=%s\n",
+       snap.lat, snap.lon, snap.speed_kmh, snap.satellites, sosActive ? "ACTIVE" : "off");
 
   char payloadBuf[512];
   int  payloadLen = buildPayload(payloadBuf, sizeof(payloadBuf), sosActive);
   if (payloadLen <= 0) {
     LOGLN(F("[MAIN] JSON build failed")); return;
   }
-  LOGF("[MAIN] Payload (%d bytes): %s\n", payloadLen, payloadBuf);
+
+  // Print the exact JSON being sent to the Serial Monitor
+  DIVIDER();
+  LOGF("[JSON] %s\n", payloadBuf);
+  DIVIDER();
 
   if (http_post(payloadBuf, payloadLen)) {
     errCount = 0;
@@ -730,229 +809,6 @@ void telemetry_send() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  LOCAL WI-FI AP TEST PANEL
-//  Connect to Wi-Fi: BusTracker-Panel / bustrack8
-//  Then open http://192.168.4.1 in any browser
-//  Works independently — transmission to ngrok still runs normally
-// ═════════════════════════════════════════════════════════════════════════════
-
-static String wp_simSignal() {
-  String r   = sim_sendCapture("AT+CSQ", 1000);
-  int    idx = r.indexOf("+CSQ:");
-  if (idx == -1) return "no response";
-  int rssi   = r.substring(idx + 5).toInt();
-  if (rssi == 99) return "no signal";
-  int dbm    = -113 + 2 * rssi;
-  const char* q = (rssi >= 20) ? "Excellent" :
-                  (rssi >= 15) ? "Good"      :
-                  (rssi >= 10) ? "Fair"      :
-                  (rssi >=  5) ? "Poor"      : "Very poor";
-  char buf[48];
-  snprintf(buf, sizeof(buf), "CSQ %d  (~%d dBm)  %s", rssi, dbm, q);
-  return String(buf);
-}
-
-static String wp_simOperator() {
-  String r  = sim_sendCapture("AT+COPS?", 1500);
-  int    q1 = r.indexOf('"');
-  int    q2 = r.indexOf('"', q1 + 1);
-  if (q1 >= 0 && q2 > q1) return r.substring(q1 + 1, q2);
-  return "not registered";
-}
-
-static String wp_simPin() {
-  String r = sim_sendCapture("AT+CPIN?", 1000);
-  if (r.indexOf("READY")        != -1) return "READY";
-  if (r.indexOf("SIM PIN")      != -1) return "PIN required";
-  if (r.indexOf("NOT INSERTED") != -1) return "no SIM";
-  return "unknown";
-}
-
-static String htmlEsc(String s) {
-  s.replace("&","&amp;"); s.replace("<","&lt;"); s.replace(">","&gt;");
-  return s;
-}
-
-void wp_handleRoot() {
-  const char* page = R"HTML(<!DOCTYPE html><html><head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BusTracker Panel</title>
-<style>
-body{font-family:system-ui,Arial;margin:0;background:#0f172a;color:#e2e8f0}
-.wrap{max-width:540px;margin:auto;padding:16px}
-h1{font-size:20px;margin-bottom:4px}
-.sub{color:#64748b;font-size:13px;margin-bottom:16px}
-h2{font-size:14px;color:#94a3b8;margin:18px 0 6px}
-.card{background:#1e293b;border-radius:12px;padding:14px;margin:10px 0}
-input,button{font-size:15px;padding:10px;border-radius:8px;border:none;width:100%;box-sizing:border-box;margin:5px 0}
-input{background:#334155;color:#fff}
-button{background:#3b82f6;color:#fff;font-weight:600;cursor:pointer}
-button.red{background:#ef4444}
-.row{display:flex;gap:8px}.row button{margin:0}
-pre{background:#0f172a;padding:10px;border-radius:8px;white-space:pre-wrap;font-size:12px;max-height:220px;overflow:auto;margin:6px 0}
-.stat{font-size:14px;line-height:2}
-.stat b{color:#38bdf8}
-.gps-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
-.gbox{background:#0f172a;border-radius:8px;padding:10px;text-align:center}
-.gbox .val{font-size:22px;font-weight:700;color:#34d399}
-.gbox .lbl{font-size:11px;color:#64748b;margin-top:2px}
-.badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600}
-.on{background:#166534;color:#4ade80}.off{background:#7f1d1d;color:#fca5a5}
-</style></head><body><div class="wrap">
-<h1>BusTracker Panel</h1>
-<div class="sub">SIMCom A7670C &middot; VI &middot; Local AP</div>
-
-<h2>GPS Live</h2>
-<div class="card" id="gps">Loading…</div>
-
-<h2>SIM Status</h2>
-<div class="card stat" id="sim">Loading…</div>
-
-<h2>Send SMS</h2>
-<div class="card">
-  <input id="snum" placeholder="+9198XXXXXXXX">
-  <input id="smsg" placeholder="Message text">
-  <button onclick="doSms()">Send SMS</button>
-</div>
-
-<h2>Voice Call</h2>
-<div class="card">
-  <input id="cnum" placeholder="+9198XXXXXXXX">
-  <div class="row">
-    <button onclick="doCall()">Call</button>
-    <button class="red" onclick="doHang()">Hang up</button>
-  </div>
-</div>
-
-<h2>Inbox</h2>
-<div class="card">
-  <button onclick="doRead()">Read stored SMS</button>
-  <pre id="out">—</pre>
-</div>
-
-<script>
-function setOut(t){document.getElementById('out').textContent=t}
-async function refreshGps(){
-  try{let r=await fetch('/gps');document.getElementById('gps').innerHTML=await r.text();}catch(e){}
-}
-async function refreshSim(){
-  try{let r=await fetch('/simstatus');document.getElementById('sim').innerHTML=await r.text();}catch(e){}
-}
-async function doSms(){
-  let n=document.getElementById('snum').value,m=document.getElementById('smsg').value;
-  setOut('Sending…');
-  let r=await fetch('/sms?num='+encodeURIComponent(n)+'&msg='+encodeURIComponent(m));
-  setOut(await r.text());
-}
-async function doCall(){
-  let n=document.getElementById('cnum').value;setOut('Calling '+n+'…');
-  let r=await fetch('/call?num='+encodeURIComponent(n));setOut(await r.text());
-}
-async function doHang(){let r=await fetch('/hangup');setOut(await r.text());}
-async function doRead(){setOut('Reading…');let r=await fetch('/readsms');setOut(await r.text());}
-refreshGps();refreshSim();
-setInterval(refreshGps,3000);
-setInterval(refreshSim,8000);
-</script>
-</div></body></html>)HTML";
-  apServer.send(200, "text/html", page);
-}
-
-void wp_handleGps() {
-  char buf[320];
-  if (snap.valid) {
-    snprintf(buf, sizeof(buf),
-      "<div class='gps-grid'>"
-      "<div class='gbox'><div class='val'>%.6f</div><div class='lbl'>Latitude</div></div>"
-      "<div class='gbox'><div class='val'>%.6f</div><div class='lbl'>Longitude</div></div>"
-      "<div class='gbox'><div class='val'>%.1f</div><div class='lbl'>Speed (km/h)</div></div>"
-      "<div class='gbox'><div class='val'>%lu</div><div class='lbl'>Satellites</div></div>"
-      "<div class='gbox'><div class='val'>%.1f m</div><div class='lbl'>Altitude</div></div>"
-      "<div class='gbox'><div class='val'>%.2f</div><div class='lbl'>HDOP</div></div>"
-      "</div><div style='margin-top:8px;font-size:12px;color:#64748b'>%s %s UTC</div>",
-      snap.lat, snap.lon, snap.speed_kmh, snap.satellites,
-      snap.altitude_m, snap.hdop, snap.date, snap.utcTime);
-  } else {
-    snprintf(buf, sizeof(buf),
-      "<span class='badge off'>NO FIX</span>"
-      " &nbsp; chars=%lu &nbsp; failed=%lu &nbsp; (searching…)",
-      gps.charsProcessed(), gps.failedChecksum());
-  }
-  apServer.send(200, "text/html", buf);
-}
-
-void wp_handleSimStatus() {
-  String sig  = wp_simSignal();
-  String oper = wp_simOperator();
-  String pin  = wp_simPin();
-  String net  = networkReady
-    ? "<span class='badge on'>ONLINE</span>"
-    : "<span class='badge off'>OFFLINE</span>";
-  String html =
-    "SIM: <b>" + pin + "</b><br>"
-    "Operator: <b>" + oper + "</b><br>"
-    "Signal: <b>" + sig + "</b><br>"
-    "4G Data: " + net;
-  apServer.send(200, "text/html", html);
-}
-
-void wp_handleSms() {
-  String num = apServer.arg("num");
-  String msg = apServer.arg("msg");
-  if (num.length() < 5) { apServer.send(200, "text/plain", "Bad number"); return; }
-  sim_sendExpect("AT+CMGF=1", "OK", 600);
-  sim_sendExpect("AT+CSCS=\"GSM\"", "OK", 600);
-  sim_clearRx();
-  simSerial.print("AT+CMGS=\"" + num + "\"\r");
-  delay(600);
-  simSerial.print(msg);
-  simSerial.write(26);
-  String resp; uint32_t t0 = millis();
-  while (millis() - t0 < 9000) {
-    while (simSerial.available()) resp += (char)simSerial.read();
-    if (resp.indexOf("+CMGS") >= 0 || resp.indexOf("ERROR") >= 0) break;
-  }
-  bool ok = resp.indexOf("+CMGS") >= 0;
-  apServer.send(200, "text/plain", ok ? "SMS sent OK" : "SMS failed:\n" + htmlEsc(resp));
-}
-
-void wp_handleCall() {
-  String num = apServer.arg("num");
-  if (num.length() < 5) { apServer.send(200, "text/plain", "Bad number"); return; }
-  String r = sim_sendCapture(("ATD" + num + ";").c_str(), 1500);
-  apServer.send(200, "text/plain", "Dialing " + num + "\n" + htmlEsc(r));
-}
-
-void wp_handleHangup() {
-  String r = sim_sendCapture("AT+CHUP", 1000);
-  apServer.send(200, "text/plain", "Hung up\n" + htmlEsc(r));
-}
-
-void wp_handleReadSms() {
-  sim_sendExpect("AT+CMGF=1", "OK", 600);
-  String r = sim_sendCapture("AT+CMGL=\"ALL\"", 5000);
-  if (r.length() < 3) r = "(no messages / empty)";
-  apServer.send(200, "text/plain", htmlEsc(r));
-}
-
-void webpanel_setup() {
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  apServer.on("/",          wp_handleRoot);
-  apServer.on("/gps",       wp_handleGps);
-  apServer.on("/simstatus", wp_handleSimStatus);
-  apServer.on("/sms",       wp_handleSms);
-  apServer.on("/call",      wp_handleCall);
-  apServer.on("/hangup",    wp_handleHangup);
-  apServer.on("/readsms",   wp_handleReadSms);
-  apServer.begin();
-  LOGLN(F("[AP] Wi-Fi panel started"));
-  LOGF("[AP] Connect to Wi-Fi: %s  password: %s\n", AP_SSID, AP_PASS);
-  LOGF("[AP] Then open: http://");
-  LOGLN(WiFi.softAPIP());
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
 //  SETUP
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -963,14 +819,17 @@ void setup() {
   LOGLN(F(""));
   LOGLN(F("============================================"));
   LOGLN(F("  BusTracker ESP32 -- Powering Up          "));
-  LOGLN(F("  Module: SIMCom A7670C + VI SIM            "));
+  LOGLN(F("  Module: SIMCom A7670C 4G + SOS button     "));
   LOGLN(F("============================================"));
   LOGF("  Bus ID   : %s\n",   BUS_ID);
-  LOGF("  Server   : https://%s%s\n", NGROK_HOST, SERVER_PATH);
+  LOGF("  SIM No.  : %s\n",   SIM_NUMBER);
+  LOGF("  Server   : https://%s%s\n", SERVER_HOST, SERVER_PATH);
   LOGF("  APN      : %s\n",   SIM_APN);
-  LOGLN(F("  SOS/RST  : not connected (disabled)       "));
   LOGLN(F("============================================"));
   LOGLN(F(""));
+
+  sos_setup();
+  LOGLN(F("[SOS] Button armed on GPIO32 (press to trigger, press again to clear)"));
 
   // Start GPS UART first — GPS runs independently of SIM
   gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
@@ -983,7 +842,6 @@ void setup() {
   delay(3000);
 
   // Try SIM init up to 3 times, then continue without it
-  // GPS and Serial Monitor work even if SIM fails
   bool simOk = false;
   for (uint8_t attempt = 1; attempt <= 3; attempt++) {
     LOGF("[SIM] Init attempt %d / 3...\n", attempt);
@@ -1009,9 +867,6 @@ void setup() {
     LOGLN(F("[GPS] Continuing — will keep retrying in main loop"));
   }
 
-  // Start local Wi-Fi AP test panel
-  webpanel_setup();
-
   DIVIDER();
   LOGF("[MAIN] Setup complete | SIM: %s | GPS: searching\n",
        simOk ? "ONLINE" : "OFFLINE");
@@ -1029,17 +884,17 @@ void loop() {
   // Always feed GPS — must never be starved
   gps_feed();
 
-  // Serve local AP web panel requests
-  apServer.handleClient();
+  // Always poll SOS button — must never be starved
+  sos_poll();
 
-  // Periodic live-status print (GPS + SIM state every 5 s)
+  // Periodic live-status print (GPS + SIM + SOS state every 5 s)
   if (millis() - lastStatusMs >= STATUS_PRINT_MS) {
     lastStatusMs = millis();
     gps_snapshot();
     printLiveStatus();
   }
 
-  // If SIM offline, retry every 60 s — GPS still runs normally
+  // If SIM offline, retry every 60 s — GPS/SOS still run normally
   if (!networkReady) {
     if (millis() - lastSimRetryMs >= SIM_RETRY_INTERVAL_MS) {
       lastSimRetryMs = millis();
@@ -1047,7 +902,7 @@ void loop() {
       sim_initialize();
     }
     delay(10);
-    return;   // skip send — but GPS feed and status print still run above
+    return;
   }
 
   // Send telemetry on interval (only when SIM is online)
