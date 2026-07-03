@@ -534,6 +534,24 @@ bool sim_waitRegistered(uint32_t timeoutMs = 90000) {
   return csOk;
 }
 
+// Ask the module WHY the last data/registration action failed. AT+CEER returns
+// the network's own cause (e.g. "missing or unknown APN", "insufficient
+// resources", "operator determined barring"). This is what separates a real
+// data-plan / APN rejection (module answers with a reason) from a local
+// BROWNOUT (module has reset and answers nothing / garbage).
+void sim_logExtendedError() {
+  String r = sim_sendCapture("AT+CEER", 4000);
+  String reason = at_extractLine(r, "+CEER:");
+  if (reason.length()) {
+    LOGF("[SIM] Last failure cause (CEER): %s\n", reason.c_str());
+    LOGLN(F("[SIM]   -> module answered => NOT a reset. Suspect APN / data plan."));
+  } else {
+    LOGLN(F("[SIM] CEER: no reason returned — module may have reset."));
+    LOGLN(F("[SIM]   -> silence here + garbage serial + GPS drop => POWER BROWNOUT."));
+    LOGLN(F("[SIM]   -> give the A7670C its own 5V/2A supply + 1000uF cap, shared GND."));
+  }
+}
+
 bool sim_activateDataContext() {
   // Define the PDP context (APN) BEFORE attaching. On VI Vodafone, attaching
   // with a blank/default context first makes the network reject the data
@@ -558,8 +576,19 @@ bool sim_activateDataContext() {
 
     sim_sendExpect("AT+CGACT=0,1", "OK", 8000);   // clear any stale context
     delay(500);
-    if (!sim_sendExpect("AT+CGACT=1,1", "OK", 30000)) {
-      LOGF("[SIM] CGACT failed: %s\n", apns[i]);
+
+    // Activate the bearer — retry once. A single transient supply sag or a slow
+    // network response can fail the first attempt. On the first failure, ask the
+    // module for the network's reason (CEER) so power vs. plan is unambiguous.
+    bool activated = sim_sendExpect("AT+CGACT=1,1", "OK", 30000);
+    if (!activated) {
+      LOGF("[SIM] CGACT attempt 1 failed on %s — asking module why...\n", apns[i]);
+      sim_logExtendedError();
+      delay(2000);
+      activated = sim_sendExpect("AT+CGACT=1,1", "OK", 30000);
+    }
+    if (!activated) {
+      LOGF("[SIM] CGACT failed on %s after retry\n", apns[i]);
       delay(1500);
       continue;
     }
