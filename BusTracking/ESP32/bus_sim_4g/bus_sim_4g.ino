@@ -9,7 +9,7 @@
   ║  NEO-6M  RX  →  ESP32 GPIO 17  (GPS_TX_PIN, optional)         ║
   ║  NEO-6M  VCC →  3.3 V                                         ║
   ║  NEO-6M  GND →  GND                                           ║
-  ║                                                                ║
+  ║                                                               ║
   ║  A7670C  TX  →  ESP32 GPIO 26  (SIM_RX_PIN)                   ║
   ║  A7670C  RX  →  ESP32 GPIO 27  (SIM_TX_PIN)                   ║
   ║  A7670C  RST →  ESP32 GPIO  4  (SIM_RST_PIN, optional)        ║
