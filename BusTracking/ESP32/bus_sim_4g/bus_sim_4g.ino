@@ -688,36 +688,55 @@ bool http_post(const char* payload, int payloadLen) {
   sim_sendExpect("AT+HTTPTERM", "OK", 4000);
   delay(300);
 
-  if (!sim_sendExpect("AT+HTTPINIT", "OK", 6000)) {
-    LOGLN(F("[HTTP] HTTPINIT failed")); return false;
-  }
-  if (!sim_sendExpect("AT+HTTPSSL=1", "OK", 3000)) {
-    LOGLN(F("[HTTP] SSL enable warning"));
-  }
-  if (!sim_sendExpect("AT+HTTPPARA=\"CID\",1", "OK")) {
-    sim_sendExpect("AT+HTTPTERM", "OK", 2000); return false;
+  String r;
+
+  r = sim_sendCapture("AT+HTTPINIT", 6000);
+  if (r.indexOf("OK") == -1) {
+    LOGF("[HTTP] HTTPINIT failed: %s\n", r.c_str());
+    return false;
   }
 
+  // NOTE: the A7670C has NO 'AT+HTTPSSL' command (that is a SIM800 command).
+  // On the A7670C, HTTPS is enabled purely by the https:// URL scheme plus the
+  // SSL-context bind below (AT+HTTPPARA "SSLCFG"). Sending AT+HTTPSSL only ever
+  // returns ERROR and can leave the HTTP parser in a bad state, so it is gone.
+
+  // Set the URL *first* so the module knows it is an https:// request before
+  // we bind the SSL context.
   char urlCmd[320];
   snprintf(urlCmd, sizeof(urlCmd),
            "AT+HTTPPARA=\"URL\",\"https://%s%s\"", SERVER_HOST, SERVER_PATH);
-  if (!sim_sendExpect(urlCmd, "OK", 5000)) {
-    LOGLN(F("[HTTP] Set URL failed"));
+  r = sim_sendCapture(urlCmd, 5000);
+  if (r.indexOf("OK") == -1) {
+    LOGF("[HTTP] Set URL failed: %s\n", r.c_str());
     sim_sendExpect("AT+HTTPTERM", "OK", 2000); return false;
   }
 
-  if (!sim_sendExpect("AT+HTTPPARA=\"CONTENT\",\"application/json\"", "OK")) {
+  r = sim_sendCapture("AT+HTTPPARA=\"CID\",1", 3000);
+  if (r.indexOf("OK") == -1) {
+    LOGF("[HTTP] Set CID failed: %s\n", r.c_str());
     sim_sendExpect("AT+HTTPTERM", "OK", 2000); return false;
   }
 
-  // Link SSL profile 0 to HTTP (required for HTTPS on A7670C)
-  sim_sendExpect("AT+HTTPPARA=\"SSLCFG\",0", "OK", 3000);
+  r = sim_sendCapture("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 3000);
+  if (r.indexOf("OK") == -1) {
+    LOGF("[HTTP] Set CONTENT failed: %s\n", r.c_str());
+    sim_sendExpect("AT+HTTPTERM", "OK", 2000); return false;
+  }
 
-  // Send auth token header
+  // Bind SSL context 0 to the HTTP session (this is what actually enables HTTPS
+  // on the A7670C). Non-fatal — some firmware auto-binds from the https:// URL.
+  r = sim_sendCapture("AT+HTTPPARA=\"SSLCFG\",0", 3000);
+  if (r.indexOf("OK") == -1)
+    LOGF("[HTTP] SSLCFG bind warning (continuing): %s\n", r.c_str());
+
+  // Auth token header
   char hdrCmd[160];
   snprintf(hdrCmd, sizeof(hdrCmd),
            "AT+HTTPPARA=\"USERDATA\",\"Token: %s\"", DEVICE_TOKEN);
-  sim_sendExpect(hdrCmd, "OK");
+  r = sim_sendCapture(hdrCmd, 3000);
+  if (r.indexOf("OK") == -1)
+    LOGF("[HTTP] USERDATA header warning (continuing): %s\n", r.c_str());
 
   char dataCmd[48];
   snprintf(dataCmd, sizeof(dataCmd), "AT+HTTPDATA=%d,10000", payloadLen);
@@ -758,6 +777,10 @@ bool http_post(const char* payload, int payloadLen) {
     if (actionResp.indexOf(F("+HTTPACTION:")) != -1) break;
     delay(100);
   }
+
+  // Dump the raw action response so SSL/DNS error codes are never hidden.
+  actionResp.trim();
+  LOGF("[HTTP] HTTPACTION raw: %s\n", actionResp.c_str());
 
   int httpCode = -1;
   int idx      = actionResp.indexOf(F("+HTTPACTION:"));
