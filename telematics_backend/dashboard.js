@@ -1147,6 +1147,9 @@ function leaveTripLog() {
 let btMap = null, btMarker = null, btTrail = null, btTickId = null;
 let btBusId = 'BUS01', btTrailPts = [];
 let btCountdown = 5, btCountdownId = null;
+// Device posts every 5 s. If the newest record is older than this, the ESP32 has
+// stopped sending — show "awaiting signal", NEVER the last stored position.
+const BT_STALE_MS = 15000;
 
 function openBusTest() {
   showV('busTestView');
@@ -1202,14 +1205,28 @@ async function bustest_refresh() {
   try {
     const r = await fetch(`${BACKEND}/telemetry/latest?dev_id=${encodeURIComponent(btBusId)}`,
       { signal: AbortSignal.timeout(2500) });
-    if (!r.ok) { bustest_setStatus(false, null); return; }
+    if (!r.ok) { bustest_setStatus(false, null); bustest_clearUI(); return; }
     const j = await r.json();
     const d = j.data;
-    if (!d || d.lat == null) { bustest_setStatus(false, null); return; }
+    if (!d || d.lat == null) { bustest_setStatus(false, null); bustest_clearUI(); return; }
+
+    // Freshness gate — /telemetry/latest always returns the newest DB row,
+    // even if it's hours old. Only show it as LIVE when the ESP32 is actually
+    // still posting. If the record is stale, blank the panel and show
+    // "awaiting signal" instead of the last stored position.
+    const ts    = Number(d.timestamp);
+    const ageMs = Number.isFinite(ts) ? (Date.now() - ts * 1000) : Infinity;
+    if (ageMs > BT_STALE_MS) {
+      bustest_setStatus(false, Number.isFinite(ts) ? ts : null);
+      bustest_clearUI();
+      return;
+    }
+
     bustest_updateUI(d);
     bustest_setStatus(true, d.timestamp || d.ts || null);
   } catch (_) {
     bustest_setStatus(false, null);
+    bustest_clearUI();
   }
 }
 
@@ -1223,10 +1240,38 @@ function bustest_setStatus(online, ts) {
   if (lsEl) {
     if (online && ts) {
       lsEl.textContent = 'Last seen: ' + new Date(ts * 1000).toLocaleTimeString();
+    } else if (ts) {
+      // Honest about staleness — show WHEN the last packet arrived, not its data
+      lsEl.textContent = 'Waiting for device… (last packet ' +
+                         new Date(ts * 1000).toLocaleTimeString() + ')';
     } else {
       lsEl.textContent = 'Waiting for device…';
     }
   }
+}
+
+// Wipe every live field back to "awaiting signal" so a stale record is never
+// left on screen. Called whenever the device is offline or its data is stale.
+function bustest_clearUI() {
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  set('btLat', '—'); set('btLon', '—');
+  set('btSpeed', '0');
+  const bar = document.getElementById('btSpdBar'); if (bar) bar.style.width = '0%';
+  const mp = document.getElementById('btMpill');
+  if (mp) { mp.textContent = '● —'; mp.style.color = '#8b949e'; }
+  set('btSats', '—'); set('btHdop', '—'); set('btAlt', '—');
+  set('btDate', '—'); set('btTime', '—');
+  const js = document.getElementById('btJson');
+  if (js) js.textContent = '{\n  "status": "awaiting signal..."\n}';
+  // SOS back to safe/idle
+  const sosAlert = document.getElementById('btSosAlert'); if (sosAlert) sosAlert.style.display = 'none';
+  set('btSosIco', '🟢');
+  const sosSt = document.getElementById('btSosSt');
+  if (sosSt) { sosSt.textContent = 'ARMED / SAFE'; sosSt.style.color = '#3fb950'; }
+  set('btSosSub', 'No emergency detected');
+  const sosCard = document.getElementById('btSosCard'); if (sosCard) sosCard.style.background = '';
+  // Re-show the "Awaiting GPS signal…" overlay on the map
+  const overlay = document.getElementById('btMapOverlay'); if (overlay) overlay.style.display = '';
 }
 
 function bustest_updateUI(t) {
