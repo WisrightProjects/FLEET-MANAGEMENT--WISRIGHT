@@ -126,7 +126,11 @@ async function syncFromAPI() {
       sim[id].sos   = (t.sos_active && !sosAcknowledged.has(id)) ? 1 : 0;
       sim[id].ts    = new Date(t.timestamp * 1000).toISOString();
       sim[id].stop  = sim[id].speed < 6;
-      sim[id].lastUpdate = Date.now();
+      // Use the packet's real server timestamp, NOT poll time. /telemetry/all-latest
+      // always returns the newest DB row even if it's hours old; stamping Date.now()
+      // made a stale row look "fresh" so the bus never went offline. With the real
+      // send time, the 30 s offline checks below reflect the DEVICE, not the poll.
+      sim[id].lastUpdate = t.timestamp ? t.timestamp * 1000 : Date.now();
 
       const gf = chkGeo(t.lat, t.lon);
       sim[id].geo = gf || null;
@@ -190,7 +194,9 @@ function tick() {
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     dateEl.textContent = `${days[n.getDay()]}, ${n.getDate()} ${months[n.getMonth()]} ${n.getFullYear()}`;
   }
-  const all = Object.values(sim).filter(b => b.lastUpdate > 0);
+  // Count only buses that are actually LIVE (sent within the last 30 s), so the
+  // stats don't keep counting a bus that stopped transmitting.
+  const all = Object.values(sim).filter(b => b.lastUpdate > 0 && (Date.now() - b.lastUpdate) <= 30000);
   const totalEl = document.getElementById('sBusTotal');
   if (totalEl) totalEl.textContent = all.length;
   document.getElementById('sMoving').textContent  = all.filter(b => !b.stop && !b.sos).length;
@@ -460,16 +466,16 @@ function renderTable(trip, f) {
     const sc  = sclr(b.speed);
     const dotCls = isSos ? 'sdot-sos' : isOffline ? 'sdot-off' : b.stop ? 'sdot-st' : 'sdot-mv';
     const stTxt  = isSos ? '⚠ SOS'   : isOffline ? 'No signal' : b.stop ? 'Stopped' : 'Moving';
-    const ns     = (hasData && b.lat != null) ? nearestStop(b.lat, b.lon) : null;
-    const geo    = b.geo
+    const ns     = (!isOffline && b.lat != null) ? nearestStop(b.lat, b.lon) : null;
+    const geo    = (!isOffline && b.geo)
       ? `📍 ${b.geo.name}`
       : ns ? `Near ${ns.stop.name} <span style="font-size:.65rem;color:#6b7280">(${ns.dist}m)</span>` : '—';
-    const overspeedBadge = isOverspeed ? `<span class="overspeed-badge">OVERSPEED</span>` : '';
+    const overspeedBadge = (isOverspeed && !isOffline) ? `<span class="overspeed-badge">OVERSPEED</span>` : '';
     return `<tr class="${isOffline ? 'offline-row' : ''}">
       <td><b>${m.num}</b></td>
       <td style="max-width:150px;font-size:.76rem;color:#a8a29e">${m.route}</td>
       <td><span class="sdot ${dotCls}"></span>${stTxt}</td>
-      <td><b style="color:${sc}">${hasData ? b.speed : '—'}</b>${hasData ? ' km/h' : ''} ${overspeedBadge}</td>
+      <td><b style="color:${sc}">${!isOffline ? b.speed : '—'}</b>${!isOffline ? ' km/h' : ''} ${overspeedBadge}</td>
       <td style="font-size:.74rem;color:#a8a29e">${
         isOffline
           ? `<span style="color:#6b7280;font-size:.7rem">Awaiting GPS signal…</span>`
@@ -630,23 +636,28 @@ function updateTele(id) {
   const isOverspeed = b.speed > 70;
   const isOffline   = !hasData || (Date.now() - b.lastUpdate) > 30000;
 
-  if (hasData && lmap && lmarker) {
+  // Only track the marker while the device is LIVE. When offline, dim the last
+  // pin rather than following a stale position.
+  if (!isOffline && lmap && lmarker) {
+    lmarker.setOpacity(1);
     lmarker.setLatLng([b.lat, b.lon]);
     lmarker.setIcon(busIcon(m.color, isSos));
     lmarker.bindPopup(`<b>${m.num}</b><br>Speed: <b>${b.speed} km/h</b><br>${b.geo ? 'At: ' + b.geo.name : 'En route'}`);
     if (ltrail) { ltrail.setLatLngs(b.trail); ltrail.setStyle({color: m.color}); }
     // Always pan to keep the bus centred — GPS updates every 3s so movement is small
     lmap.panTo([b.lat, b.lon], {animate: true, duration: 0.8});
+  } else if (isOffline && lmarker) {
+    lmarker.setOpacity(0.3);
   }
 
   // HUD — US-28: red + OVERSPEED label when >70
   const hudNum = document.getElementById('hudNum');
-  hudNum.textContent = hasData ? b.speed : '—';
+  hudNum.textContent = !isOffline ? b.speed : '—';
   hudNum.style.color = sc;
   const hudLbl = document.querySelector('.hud-lbl');
-  if (hudLbl) hudLbl.textContent = isOverspeed ? '⚠ OVERSPEED' : 'Axle Speed';
+  if (hudLbl) hudLbl.textContent = (isOverspeed && !isOffline) ? '⚠ OVERSPEED' : 'Axle Speed';
   const hb = document.getElementById('hudBar');
-  hb.style.width = p + '%'; hb.style.background = sc;
+  hb.style.width = (isOffline ? 0 : p) + '%'; hb.style.background = sc;
   document.getElementById('hudSos').className = 'hud-sos' + (isSos ? ' on' : '');
 
   document.getElementById('tId').textContent = id;
@@ -654,10 +665,10 @@ function updateTele(id) {
     ? 'Awaiting GPS signal…'
     : (b.ts || '—');
 
-  document.getElementById('tSpd').textContent = hasData ? b.speed : '—';
+  document.getElementById('tSpd').textContent = !isOffline ? b.speed : '—';
   document.getElementById('tSpd').style.color = sc;
   const sb = document.getElementById('tSpdBar');
-  sb.style.width = p + '%'; sb.style.background = sc;
+  sb.style.width = (isOffline ? 0 : p) + '%'; sb.style.background = sc;
   const mp = document.getElementById('tMpill');
   mp.textContent = isOffline ? '📡 No signal' : b.stop ? '⏸ Stopped' : '▶ Moving';
   mp.className = 'mpill ' + (isOffline ? 'mpill-st' : b.stop ? 'mpill-st' : 'mpill-mv');
@@ -665,7 +676,7 @@ function updateTele(id) {
   // US-21: ETA to next stop
   let etaEl = document.getElementById('tEta');
   const eta = etaToNextStop(b);
-  if (eta && hasData) {
+  if (eta && !isOffline) {
     if (!etaEl) {
       etaEl = document.createElement('div');
       etaEl.id = 'tEta';
@@ -678,7 +689,7 @@ function updateTele(id) {
   // US-26: "bus appears stopped" notice
   const stoppedMs = b.stopSince ? (Date.now() - b.stopSince) : 0;
   let stoppedNotice = document.getElementById('stopped-notice');
-  if (stoppedMs > 120000 && hasData) {
+  if (stoppedMs > 120000 && !isOffline) {
     const mm = Math.floor(stoppedMs / 60000), ss = Math.floor((stoppedMs % 60000) / 1000);
     if (!stoppedNotice) {
       stoppedNotice = document.createElement('div');
@@ -689,8 +700,8 @@ function updateTele(id) {
     stoppedNotice.textContent = `⚠ Bus appears stopped for ${mm}m ${ss}s`;
   } else if (stoppedNotice) { stoppedNotice.remove(); }
 
-  document.getElementById('tLat').textContent = hasData ? b.lat.toFixed(6) + '°' : '—';
-  document.getElementById('tLon').textContent = hasData ? b.lon.toFixed(6) + '°' : '—';
+  document.getElementById('tLat').textContent = !isOffline ? b.lat.toFixed(6) + '°' : '—';
+  document.getElementById('tLon').textContent = !isOffline ? b.lon.toFixed(6) + '°' : '—';
 
   // SOS card — US-31: ack button
   const sc2 = document.getElementById('tSosCard');
@@ -712,18 +723,20 @@ function updateTele(id) {
     }
   } else if (ackBtn) { ackBtn.remove(); }
 
-  // Geofence — show nearest stop when outside all geofences
-  const geoNs = (hasData && b.lat != null) ? nearestStop(b.lat, b.lon) : null;
-  document.getElementById('tGeoIco').textContent = b.geo ? '📌' : (geoNs ? '🛣️' : '⏳');
-  document.getElementById('tGeoNm').textContent  = b.geo
-    ? b.geo.name
+  // Geofence — show nearest stop when outside all geofences. When offline,
+  // don't show a stale geofence — force "awaiting".
+  const liveGeo = !isOffline ? b.geo : null;
+  const geoNs = (!isOffline && b.lat != null) ? nearestStop(b.lat, b.lon) : null;
+  document.getElementById('tGeoIco').textContent = liveGeo ? '📌' : (geoNs ? '🛣️' : '⏳');
+  document.getElementById('tGeoNm').textContent  = liveGeo
+    ? liveGeo.name
     : geoNs ? `Near ${geoNs.stop.name}` : 'Awaiting GPS signal';
-  document.getElementById('tGeoSb').textContent  = b.geo
-    ? 'Inside geofence · ' + b.geo.id
+  document.getElementById('tGeoSb').textContent  = liveGeo
+    ? 'Inside geofence · ' + liveGeo.id
     : geoNs ? `${geoNs.dist} m away · En route` : '—';
 
   // Live JSON packet
-  document.getElementById('tJson').textContent = JSON.stringify(hasData ? {
+  document.getElementById('tJson').textContent = JSON.stringify(!isOffline ? {
     dev_id: id, ts: b.ts,
     lat: +b.lat.toFixed(6), lon: +b.lon.toFixed(6),
     speed_kmh: b.speed,
