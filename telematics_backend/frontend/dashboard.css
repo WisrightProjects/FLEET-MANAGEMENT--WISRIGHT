@@ -997,3 +997,33 @@ tbody td b{color:#fafaf9}
 @media(max-width:600px){
   .eta-panel{width:100%;height:60%!important;top:auto;bottom:0;border-left:none;border-top:1px solid #30363d}
 }
+
+/* ── AI Insights (Kimi summaries for the dummy fleet) ────────────────── */
+.ai-insights-box{
+  margin:10px 10px 0;background:#0d1117;border:1px solid #21262d;border-radius:7px;
+  padding:10px;font-size:.75rem;flex-shrink:0;
+}
+.ai-ins-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.ai-ins-title{font-weight:700;color:#e6edf3;font-size:.78rem}
+.ai-ins-attr{font-size:.6rem;color:#8b949e;font-family:'IBM Plex Mono',monospace}
+.ai-ins-attr.fallback{color:#d29922}
+.ai-ins-regen-btn{
+  background:#0d2040;border:1px solid #1f6feb;color:#58a6ff;border-radius:5px;
+  padding:2px 8px;font-size:.62rem;cursor:pointer;
+}
+.ai-ins-regen-btn:hover{background:#1f2d45}
+.ai-ins-regen-btn:disabled{opacity:.4;cursor:not-allowed}
+.ai-ins-summary{color:#c9d1d9;line-height:1.5;margin-bottom:6px}
+.ai-ins-events{margin:0 0 6px;padding-left:16px;color:#a8a29e;font-size:.7rem;line-height:1.6}
+.ai-ins-rec{
+  display:flex;gap:6px;align-items:flex-start;background:rgba(88,166,255,.08);
+  border:1px solid #1f6feb33;border-radius:5px;padding:6px 8px;font-size:.7rem;color:#58a6ff;
+}
+.ai-ins-fallback-note{margin-top:6px;font-size:.62rem;color:#d29922}
+.ai-ins-skeleton{display:flex;flex-direction:column;gap:6px}
+.ai-ins-skel-line{height:9px;border-radius:4px;background:linear-gradient(90deg,#21262d 25%,#30363d 50%,#21262d 75%);background-size:200% 100%;animation:ai-shimmer 1.3s infinite}
+.ai-ins-skel-line.w-70{width:70%}
+.ai-ins-skel-line.w-90{width:90%}
+.ai-ins-skel-line.w-50{width:50%}
+@keyframes ai-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+

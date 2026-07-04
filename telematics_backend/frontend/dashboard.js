@@ -1227,6 +1227,13 @@ function bustest_setStatus(online, ts) {
       lsEl.textContent = 'Waiting for device…';
     }
   }
+  if (!online) {
+    const overlay = document.getElementById('btMapOverlay');
+    if (overlay) overlay.style.display = '';
+    if (btMarker) { btMarker.remove(); btMarker = null; }
+    btTrailPts = [];
+    if (btTrail) btTrail.setLatLngs([]);
+  }
 }
 
 function bustest_updateUI(t) {
@@ -2121,3 +2128,330 @@ function leavePrediction() {
 // Close ETA panel when leaving tracker
 const _origLeaveTracker = leaveTracker;
 leaveTracker = function() { closeETAPanel(); _origLeaveTracker(); };
+
+/* ═══════════════════════════════════════════════════════════════
+   DUMMY FLEET — 5 morning + 5 evening simulated buses (PRD)
+   Fully additive: reuses BMETA / sim / buildTrips / renderTable /
+   openTracker so dummy buses render with the existing design
+   language. Never touches registerDevice(), syncFromAPI(), or any
+   state used by the real ESP32 device (BUS01) or the Bus Test view.
+═══════════════════════════════════════════════════════════════ */
+const DUMMY_META = {};   // dev_id -> {route_name, waypoints, driver, number}
+let dummyRouteLine = null;
+
+function registerDummyDevice(cfg) {
+  DUMMY_META[cfg.dev_id] = cfg;
+  if (!BMETA[cfg.dev_id]) {
+    BMETA[cfg.dev_id] = {
+      num: cfg.number,
+      route: cfg.route_name,
+      color: cfg.color,
+      trip: cfg.trip
+    };
+  }
+}
+
+async function loadDummyMeta() {
+  try {
+    const r = await fetch(`${BACKEND}/dummy/buses`, {signal: AbortSignal.timeout(4000)});
+    if (!r.ok) return;
+    const rows = (await r.json()).data || [];
+    rows.forEach(registerDummyDevice);
+    buildDates(); // re-render home now that dummy buses are registered
+    populateHistDateSelect();
+  } catch {}
+}
+
+async function syncDummyBuses() {
+  try {
+    const r = await fetch(`${BACKEND}/dummy/buses/live`, {signal: AbortSignal.timeout(3000)});
+    if (!r.ok) return;
+    const rows = (await r.json()).data || [];
+    rows.forEach(t => {
+      const id = t.dev_id;
+      if (!sim[id]) sim[id] = {id, lat: null, lon: null, speed: 0, sos: 0, geo: null, stop: false, stopSince: null, ts: null, trail: [], lastUpdate: 0};
+      sim[id].lat   = t.lat;
+      sim[id].lon   = t.lon;
+      sim[id].speed = t.speed_kmh;
+      sim[id].sos   = 0;
+      sim[id].ts    = new Date(t.timestamp * 1000).toISOString();
+      sim[id].stop  = t.status === 'Stopped';
+      sim[id].lastUpdate = Date.now();
+      sim[id].etaMin = t.eta_min;
+      sim[id].distanceKm = t.distance_km;
+
+      const tr = sim[id].trail;
+      const last = tr[tr.length - 1];
+      if (!last || last[0] !== t.lat || last[1] !== t.lon) {
+        tr.push([t.lat, t.lon]);
+        if (tr.length > 120) tr.shift();
+      }
+    });
+    if (document.getElementById('homeView').classList.contains('active')) updateHomeStrips();
+  } catch {}
+}
+
+loadDummyMeta();
+setInterval(syncDummyBuses, 3000);
+syncDummyBuses();
+
+// ── Route polyline + Prediction/History buttons injected into the Tracker ──
+const _origOpenTracker = openTracker;
+openTracker = function(id) {
+  _origOpenTracker(id);
+  const dummyBtnSlot = document.getElementById('dummyTrkBtns');
+  if (dummyBtnSlot) dummyBtnSlot.innerHTML = '';
+
+  const cfg = DUMMY_META[id];
+  if (!cfg) return; // real device — leave tracker exactly as-is
+
+  if (dummyBtnSlot) {
+    dummyBtnSlot.innerHTML =
+      `<button class="eta-modal-open-btn" onclick="openDummyPredPanel('${id}')" title="Predicted next days">🔮 Prediction</button>
+       <button class="eta-modal-open-btn" onclick="openDummyHistPanel('${id}')" title="Previous 15 days">📅 History</button>`;
+  }
+
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (!lmap) return;
+    if (dummyRouteLine) { dummyRouteLine.remove(); dummyRouteLine = null; }
+    const coords = cfg.waypoints.map(w => [w.lat, w.lon]);
+    dummyRouteLine = L.polyline(coords, {color: cfg.color, weight: 4, opacity: .55}).addTo(lmap);
+    coords.forEach((c, i) => {
+      L.circleMarker(c, {radius: 5, color: cfg.color, fillColor: '#fff', fillOpacity: 1, weight: 2})
+        .addTo(lmap).bindTooltip(cfg.waypoints[i].name, {direction: 'top'});
+    });
+    lmap.fitBounds(dummyRouteLine.getBounds(), {padding: [40, 40]});
+  }));
+};
+
+const _origDestroyMap = destroyMap;
+destroyMap = function() { dummyRouteLine = null; _origDestroyMap(); };
+
+// ── AI Insights (Kimi-generated or rule-based fallback summary) ────────────
+function _aiInsightsSkeleton() {
+  return `<div class="ai-ins-hdr"><span class="ai-ins-title">✨ AI Insights</span></div>
+    <div class="ai-ins-skeleton">
+      <div class="ai-ins-skel-line w-90"></div>
+      <div class="ai-ins-skel-line w-70"></div>
+      <div class="ai-ins-skel-line w-50"></div>
+    </div>`;
+}
+
+function _renderAIInsights(containerId, data, id, kind) {
+  const isFallback = data.source === 'fallback';
+  const attrLabel = isFallback ? 'Basic summary' : 'Generated by AI · Kimi';
+  document.getElementById(containerId).innerHTML = `
+    <div class="ai-ins-hdr">
+      <span class="ai-ins-title">✨ AI Insights</span>
+      <button class="ai-ins-regen-btn" id="${containerId}-regen" onclick="regenerateAIInsights('${containerId}','${id}','${kind}')">↺ Regenerate</button>
+    </div>
+    <div class="ai-ins-summary">${data.summary}</div>
+    ${data.notableEvents && data.notableEvents.length ? `<ul class="ai-ins-events">${data.notableEvents.map(e => `<li>${e}</li>`).join('')}</ul>` : ''}
+    <div class="ai-ins-rec"><span>💡</span><span>${data.recommendation}</span></div>
+    <div class="ai-ins-attr ${isFallback ? 'fallback' : ''}">${attrLabel}</div>
+    ${isFallback ? '<div class="ai-ins-fallback-note">⚠ AI summary unavailable — showing a rule-based summary instead.</div>' : ''}
+  `;
+}
+
+async function loadAIInsights(containerId, id, kind, regenerate) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = _aiInsightsSkeleton();
+  const btn = document.getElementById(`${containerId}-regen`);
+  if (btn) btn.disabled = true;
+  try {
+    const url = `${BACKEND}/dummy/insights?dev_id=${id}&kind=${kind}${regenerate ? '&regenerate=1' : ''}`;
+    const r = await fetch(url, {signal: AbortSignal.timeout(15000)});
+    const body = await r.json();
+    if (body.status !== 'ok') throw new Error(body.message || 'insights request failed');
+    _renderAIInsights(containerId, body.data, id, kind);
+  } catch {
+    el.innerHTML = `<div class="ai-ins-hdr"><span class="ai-ins-title">✨ AI Insights</span></div>
+      <div class="ai-ins-fallback-note">⚠ Could not load AI insights right now.</div>`;
+  }
+}
+
+function regenerateAIInsights(containerId, id, kind) {
+  loadAIInsights(containerId, id, kind, true);
+}
+
+// ── Prediction panel (next 5-10 days) ───────────────────────────────────────
+async function openDummyPredPanel(id) {
+  const panel = document.getElementById('dummyPredPanel');
+  if (!panel) return;
+  panel.style.display = 'flex';
+  const sub = document.getElementById('dummyPredPanelSub');
+  if (sub) sub.textContent = `${BMETA[id]?.num || id} · ${BMETA[id]?.route || ''}`;
+  loadAIInsights('dummyPredAIInsights', id, 'forecast', false);
+  const body = document.getElementById('dummyPredPanelBody');
+  body.innerHTML = '<div style="padding:10px;font-size:.75rem;color:#8b949e">Loading…</div>';
+  try {
+    const r = await fetch(`${BACKEND}/dummy/predictions?dev_id=${id}`, {signal: AbortSignal.timeout(4000)});
+    const rows = (await r.json()).data || [];
+    body.innerHTML = rows.map(row => `
+      <div class="eta-stop-card">
+        <div class="eta-stop-top">
+          <span class="eta-stop-name">${row.date}</span>
+          <span class="eta-stop-time" style="color:${row.route_confidence >= 90 ? '#3fb950' : '#d29922'}">${row.route_confidence}% conf.</span>
+        </div>
+        <div class="eta-stop-detail">
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Departure</span><span class="eta-detail-val">${row.predicted_departure}</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Arrival</span><span class="eta-detail-val">${row.predicted_arrival}</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">ETA</span><span class="eta-detail-val eta-blue">${row.predicted_eta_min} min</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Travel duration</span><span class="eta-detail-val">${row.travel_duration_min} min</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Avg speed</span><span class="eta-detail-val">${row.avg_speed_kmh} km/h</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Delay probability</span><span class="eta-detail-val">${row.delay_probability}%</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Expected distance</span><span class="eta-detail-val">${row.expected_distance} km</span></div>
+        </div>
+      </div>`).join('') || '<div style="padding:10px;font-size:.75rem;color:#8b949e">No prediction data.</div>';
+  } catch {
+    body.innerHTML = '<div style="padding:10px;font-size:.75rem;color:#f85149">Failed to load predictions.</div>';
+  }
+}
+function closeDummyPredPanel() {
+  const panel = document.getElementById('dummyPredPanel');
+  if (panel) panel.style.display = 'none';
+}
+
+// ── Historical panel (previous 15 days) ─────────────────────────────────────
+let _dummyHistDates = [];
+async function populateHistDateSelect() {
+  try {
+    const r = await fetch(`${BACKEND}/dummy/history/dates`, {signal: AbortSignal.timeout(4000)});
+    _dummyHistDates = (await r.json()).data || [];
+    const sels = [document.getElementById('histDateSelect'), document.getElementById('dummyHistDateSelect')];
+    sels.forEach(sel => {
+      if (!sel) return;
+      const keepFirst = sel.id === 'histDateSelect';
+      sel.innerHTML = (keepFirst ? '<option value="">— Select a date —</option>' : '') +
+        _dummyHistDates.map(d => `<option value="${d}">${d}</option>`).join('');
+    });
+  } catch {}
+}
+
+let _dummyHistCurrentId = null;
+function openDummyHistPanel(id) {
+  _dummyHistCurrentId = id;
+  const panel = document.getElementById('dummyHistPanel');
+  if (!panel) return;
+  panel.style.display = 'flex';
+  loadAIInsights('dummyHistAIInsights', id, 'historical', false);
+  renderDummyHistPanel();
+}
+function closeDummyHistPanel() {
+  const panel = document.getElementById('dummyHistPanel');
+  if (panel) panel.style.display = 'none';
+}
+async function renderDummyHistPanel() {
+  const id = _dummyHistCurrentId;
+  const body = document.getElementById('dummyHistPanelBody');
+  const sel = document.getElementById('dummyHistDateSelect');
+  if (!id || !body || !sel) return;
+  const date = sel.value || _dummyHistDates[0];
+  if (!date) { body.innerHTML = '<div style="padding:10px;font-size:.75rem;color:#8b949e">No history yet.</div>'; return; }
+  body.innerHTML = '<div style="padding:10px;font-size:.75rem;color:#8b949e">Loading…</div>';
+  try {
+    const r = await fetch(`${BACKEND}/dummy/history?date=${date}&dev_id=${id}`, {signal: AbortSignal.timeout(4000)});
+    const rows = (await r.json()).data || [];
+    const row = rows[0];
+    if (!row) { body.innerHTML = '<div style="padding:10px;font-size:.75rem;color:#8b949e">No record for this date.</div>'; return; }
+    // Build a readable scenario badge colour
+    const _scenColour = (s) => {
+      if (!s) return '#8b949e';
+      if (s === 'ON_TIME' || s === 'EARLY_ARRIVAL') return '#3fb950';
+      if (s === 'CANCELLED' || s === 'BREAKDOWN') return '#f85149';
+      if (s === 'MAJOR_DELAY') return '#f85149';
+      if (s === 'MINOR_DELAY' || s === 'WEATHER_SLOWDOWN') return '#d29922';
+      return '#58a6ff';
+    };
+    const scenLabel = (row.scenario_type || 'ON_TIME').replace(/_/g, ' ');
+    body.innerHTML = `
+      <div class="eta-stop-card">
+        <div class="eta-stop-detail">
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Route</span><span class="eta-detail-val">${row.route_name}</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Departure</span><span class="eta-detail-val">${row.departure_time}</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Arrival</span><span class="eta-detail-val">${row.arrival_time}</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Speed</span><span class="eta-detail-val">${row.speed_kmh} km/h</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Distance</span><span class="eta-detail-val">${row.distance_km} km</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">ETA</span><span class="eta-detail-val">${row.eta_min} min</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Delay</span><span class="eta-detail-val">${row.delay_min} min</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Status</span><span class="eta-detail-val" style="color:${row.status==='Delayed'?'#f85149':row.status==='Cancelled'?'#f85149':'#3fb950'}">${row.status}</span></div>
+          <div class="eta-detail-row"><span class="eta-detail-lbl">Scenario</span><span class="eta-detail-val" style="color:${_scenColour(row.scenario_type)};font-weight:700">${scenLabel}</span></div>
+          ${row.scenario_note ? `<div style="margin-top:6px;padding:6px 8px;background:rgba(255,255,255,.04);border-radius:4px;font-size:.68rem;color:#a8a29e;font-style:italic;line-height:1.5">${row.scenario_note}</div>` : ''}
+        </div>
+      </div>`;
+  } catch {
+    body.innerHTML = '<div style="padding:10px;font-size:.75rem;color:#f85149">Failed to load history.</div>';
+  }
+}
+
+// ── Homepage date-picker: view a previous day's full dummy-fleet dataset ──
+async function onHistDateChange() {
+  const sel = document.getElementById('histDateSelect');
+  const date = sel.value;
+  const tripsSection = document.getElementById('tripsSection');
+  const histSection  = document.getElementById('histSection');
+  if (!date) { tripsSection.style.display = ''; histSection.style.display = 'none'; return; }
+
+  tripsSection.style.display = 'none';
+  histSection.style.display  = '';
+  histSection.innerHTML = '<div style="padding:10px;font-size:.8rem;color:#8b949e">Loading…</div>';
+  try {
+    const r = await fetch(`${BACKEND}/dummy/history?date=${date}`, {signal: AbortSignal.timeout(4000)});
+    const rows = (await r.json()).data || [];
+
+    // Scenario colour helper (same as in the panel)
+    const _sc = (s) => {
+      if (!s || s === 'ON_TIME' || s === 'EARLY_ARRIVAL') return '#3fb950';
+      if (s === 'CANCELLED' || s === 'BREAKDOWN' || s === 'MAJOR_DELAY') return '#f85149';
+      if (s === 'MINOR_DELAY' || s === 'WEATHER_SLOWDOWN') return '#d29922';
+      return '#58a6ff';
+    };
+
+    histSection.innerHTML = `
+      <div class="trips-title" style="margin-bottom:16px">Dummy Fleet — ${date}</div>
+      <div class="tbl-wrap" style="margin-bottom:20px">
+        <table>
+          <thead><tr>
+            <th>Bus No.</th><th>Route</th><th>Speed</th><th>Distance</th>
+            <th>ETA</th><th>Delay</th><th>Departure</th><th>Arrival</th><th>Status</th><th>Scenario</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(row => `<tr>
+              <td><b>${BMETA[row.dev_id]?.num || row.dev_id}</b></td>
+              <td style="font-size:.76rem;color:#a8a29e">${row.route_name}</td>
+              <td>${row.speed_kmh} km/h</td>
+              <td>${row.distance_km} km</td>
+              <td>${row.eta_min} min</td>
+              <td>${row.delay_min} min</td>
+              <td>${row.departure_time}</td>
+              <td>${row.arrival_time}</td>
+              <td style="color:${row.status==='Delayed'||row.status==='Cancelled'?'#f85149':'#3fb950'}">${row.status}</td>
+              <td style="color:${_sc(row.scenario_type)};font-size:.72rem;font-weight:600">${(row.scenario_type||'ON_TIME').replace(/_/g,' ')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="trips-title" style="margin-bottom:12px">AI Fleet Insights — ${date}</div>
+      <div id="histDateAIGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;padding:0 0 20px"></div>`;
+
+    // Load AI insights for each bus that has data on this date (staggered to avoid burst)
+    const grid = document.getElementById('histDateAIGrid');
+    if (grid && rows.length) {
+      rows.forEach((row, idx) => {
+        const busLabel = BMETA[row.dev_id]?.num || row.dev_id;
+        const cid = `histDateAI-${row.dev_id}`;
+        const card = document.createElement('div');
+        card.style.cssText = 'background:#0d1117;border:1px solid #21262d;border-radius:7px;overflow:hidden';
+        card.innerHTML = `<div style="padding:8px 10px;border-bottom:1px solid #21262d;font-size:.72rem;font-weight:700;color:#e6edf3">${busLabel}</div>
+          <div class="ai-insights-box" id="${cid}" style="margin:0;border:none;border-radius:0"></div>`;
+        grid.appendChild(card);
+        // Stagger calls by 300ms per bus to avoid simultaneous burst
+        setTimeout(() => loadAIInsights(cid, row.dev_id, 'historical', false), idx * 300);
+      });
+    }
+  } catch {
+    histSection.innerHTML = '<div style="padding:10px;font-size:.8rem;color:#f85149">Failed to load historical data.</div>';
+  }
+}
+
