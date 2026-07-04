@@ -95,6 +95,12 @@ function nearestStop(la, lo) {
 function sclr(s) { return s > 70 ? '#f85149' : s > 40 ? '#d29922' : '#3fb950'; }
 function spct(s) { return Math.min(100, Math.round(s / 80 * 100)); }
 
+// Single source of truth for "is this bus's data fresh enough to trust?" —
+// a device that hasn't sent a packet in 30s is treated as offline everywhere
+// (Home strips, trip cards, list filters, tracker), not just some views.
+const LIVE_WINDOW_MS = 30000;
+function isLive(b) { return !!b && b.lastUpdate > 0 && (Date.now() - b.lastUpdate) <= LIVE_WINDOW_MS; }
+
 /* ═══════════════════════════════
    REAL BACKEND SYNC (only data source)
 ═══════════════════════════════ */
@@ -196,7 +202,7 @@ function tick() {
   }
   // Count only buses that are actually LIVE (sent within the last 30 s), so the
   // stats don't keep counting a bus that stopped transmitting.
-  const all = Object.values(sim).filter(b => b.lastUpdate > 0 && (Date.now() - b.lastUpdate) <= 30000);
+  const all = Object.values(sim).filter(isLive);
   const totalEl = document.getElementById('sBusTotal');
   if (totalEl) totalEl.textContent = all.length;
   document.getElementById('sMoving').textContent  = all.filter(b => !b.stop && !b.sos).length;
@@ -240,7 +246,7 @@ function buildDates() {
    Color taken from dynamically assigned BMETA[id].color (hex). */
 function stripHtml(id) {
   const b = sim[id], m = BMETA[id];
-  const hasData = b.lastUpdate > 0;
+  const hasData = isLive(b);
   const color   = m ? m.color : '#58a6ff';
   const spdPct  = hasData ? spct(b.speed) : 0;
   const spdTxt  = b.sos ? '🚨 SOS' : hasData ? (b.speed + ' km/h') : 'No signal';
@@ -264,7 +270,9 @@ function buildTrips(date) {
   const label = `${dn[dow]}, ${date.getDate()} ${mn[date.getMonth()]} ${date.getFullYear()}`;
 
   const liveBuses  = Object.keys(sim).filter(id => sim[id].lastUpdate > 0);
-  const sosId      = liveBuses.find(id => sim[id].sos);
+  // SOS banner must clear itself once the bus goes stale/offline — a dispatcher
+  // shouldn't keep seeing "SOS active" for a device that stopped reporting.
+  const sosId      = liveBuses.find(id => sim[id].sos && isLive(sim[id]));
 
   const sosBanner = sosId ? `<div class="sos-home-banner">
     <div class="sos-home-banner-icon">🚨</div>
@@ -303,9 +311,9 @@ function buildTrips(date) {
     const m      = BMETA[id];
     const b      = sim[id];
     const color  = m ? m.color : '#58a6ff';
-    const hasData = b && b.lastUpdate > 0;
+    const hasData = isLive(b);
     const spdPct  = hasData ? spct(b.speed) : 0;
-    const spdTxt  = b && b.sos ? '🚨 SOS' : hasData ? (b.speed + ' km/h') : 'Scheduled';
+    const spdTxt  = (hasData && b.sos) ? '🚨 SOS' : hasData ? (b.speed + ' km/h') : 'Scheduled';
     const spdClass = (b && b.speed > 70) ? 'fast' : (b && b.speed > 40) ? 'mid' : '';
     return `<div class="tc-strip" id="hs-${id}">
       <div class="tc-strip-label">${m ? m.num : id}</div>
@@ -376,7 +384,7 @@ function updateHomeStrips() {
   if (!document.getElementById('homeView').classList.contains('active')) return;
   Object.keys(BMETA).forEach(id => {
     const b = sim[id];
-    const hasData = b && b.lastUpdate > 0;
+    const hasData = isLive(b);
     const spdPct = hasData ? spct(b.speed) : 0;
     const fillEl = document.getElementById('hsfill-' + id);
     const busEl  = document.getElementById('hsbus-'  + id);
@@ -386,7 +394,7 @@ function updateHomeStrips() {
     busEl.style.left   = Math.min(93, spdPct) + '%';
     const spd = hasData ? b.speed : 0;
     const spdClass = spd > 70 ? 'fast' : spd > 40 ? 'mid' : '';
-    spdEl.textContent = (b && b.sos) ? '🚨 SOS' : hasData ? (spd + ' km/h') : 'Scheduled';
+    spdEl.textContent = (hasData && b.sos) ? '🚨 SOS' : hasData ? (spd + ' km/h') : 'Scheduled';
     spdEl.className = 'tc-strip-spd ' + spdClass;
   });
 }
@@ -446,9 +454,9 @@ function renderTable(trip, f) {
     if (trip === '3pm') return BMETA[b.id]?.trip === '3pm';
     return true;
   });
-  if (f === 'moving')  rows = rows.filter(b => !b.stop && !b.sos && b.lastUpdate > 0);
-  if (f === 'stopped') rows = rows.filter(b =>  b.stop && !b.sos && b.lastUpdate > 0);
-  if (f === 'sos')     rows = rows.filter(b => !!b.sos);
+  if (f === 'moving')  rows = rows.filter(b => !b.stop && !b.sos && isLive(b));
+  if (f === 'stopped') rows = rows.filter(b =>  b.stop && !b.sos && isLive(b));
+  if (f === 'sos')     rows = rows.filter(b => !!b.sos && isLive(b));
 
   const body = document.getElementById('busTbody');
   if (!rows.length) {
@@ -456,12 +464,10 @@ function renderTable(trip, f) {
     return;
   }
 
-  const now = Date.now();
   body.innerHTML = rows.map(b => {
     const m = BMETA[b.id];
-    const hasData     = b.lastUpdate > 0;
-    const isSos       = !!b.sos;
-    const isOffline   = !hasData || (now - b.lastUpdate) > 30000;
+    const isOffline   = !isLive(b);
+    const isSos       = !!b.sos && !isOffline;
     const isOverspeed = b.speed > 70;
     const sc  = sclr(b.speed);
     const dotCls = isSos ? 'sdot-sos' : isOffline ? 'sdot-off' : b.stop ? 'sdot-st' : 'sdot-mv';
@@ -567,7 +573,7 @@ function openTracker(id) {
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const b = sim[id];
-    const hasData = b && b.lastUpdate > 0 && b.lat !== null;
+    const hasData = isLive(b) && b.lat !== null;
     // Default view: Chennai area — replaced immediately once real GPS arrives
     const lat  = hasData ? b.lat  : (GEO.length ? GEO[0].lat : 13.0694);
     const lon  = hasData ? b.lon  : (GEO.length ? GEO[0].lon : 80.1948);
@@ -629,12 +635,11 @@ function acknowledgeSOSFor(id) {
 function updateTele(id) {
   if (!sim[id]) return; // backend hasn't returned data for this device yet
   const b = sim[id], m = BMETA[id] || {num: id, route: 'Live GPS Device', color: '#a5b4fc'};
-  const hasData     = b.lastUpdate > 0 && b.lat !== null;
-  const isSos       = !!b.sos;
+  const isOffline   = !isLive(b) || b.lat === null;
+  const isSos       = !!b.sos && !isOffline;
   const sc          = sclr(b.speed);
   const p           = spct(b.speed);
   const isOverspeed = b.speed > 70;
-  const isOffline   = !hasData || (Date.now() - b.lastUpdate) > 30000;
 
   // Only track the marker while the device is LIVE. When offline, dim the last
   // pin rather than following a stale position.
@@ -2068,7 +2073,7 @@ function etaPanel_render() {
   if (!body) return;
 
   const b = curBus ? sim[curBus] : null;
-  if (!b || b.lat === null || b.lastUpdate === 0) {
+  if (!b || b.lat === null || !isLive(b)) {
     body.innerHTML = `<div class="eta-panel-nodata">No live GPS data yet.<br>ETA available once bus connects.</div>`;
     return;
   }
