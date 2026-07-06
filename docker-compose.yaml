@@ -38,6 +38,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
+      SERVICE_FQDN_APP_5000: 'https://fms.wisright.com'
       MYSQL_HOST: mysql                    # resolves to the mysql service above
       MYSQL_USER: root
       MYSQL_PASSWORD: ${SERVICE_PASSWORD_MYSQLROOT}
