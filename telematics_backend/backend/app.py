@@ -13,6 +13,9 @@ import math
 import os
 import threading
 
+import dummy_data
+from services import summary_service
+
 app = Flask(__name__)
 CORS(app)
 
@@ -547,24 +550,26 @@ def validate(data, schema):
 
 
 # ---------------------------------------------------------------------------
-# Static file serving
+# Static file serving — dashboard lives in ../frontend (backend/ and
+# frontend/ are separate sibling folders under telematics_backend/)
 # ---------------------------------------------------------------------------
 
 _HERE = os.path.abspath(os.path.dirname(__file__))
+_FRONTEND_DIR = os.path.abspath(os.path.join(_HERE, "..", "frontend"))
 
 @app.route("/")
 def dashboard():
-    return send_from_directory(_HERE, "dashboard.html")
+    return send_from_directory(_FRONTEND_DIR, "dashboard.html")
 
 @app.route("/dashboard.css")
 def dashboard_css():
-    resp = send_from_directory(_HERE, "dashboard.css")
+    resp = send_from_directory(_FRONTEND_DIR, "dashboard.css")
     resp.headers["Content-Type"] = "text/css; charset=utf-8"
     return resp
 
 @app.route("/dashboard.js")
 def dashboard_js_route():
-    resp = send_from_directory(_HERE, "dashboard.js")
+    resp = send_from_directory(_FRONTEND_DIR, "dashboard.js")
     resp.headers["Content-Type"] = "application/javascript; charset=utf-8"
     return resp
 
@@ -1021,11 +1026,89 @@ def get_presence_count(dev_id):
 
 
 # ---------------------------------------------------------------------------
+# Dummy fleet — 5 morning + 5 evening simulated buses (PRD: Bus Tracking &
+# Fleet Management). Fully isolated dev_id namespace (DUMMY01..DUMMY10),
+# own MySQL tables (dummy_history / dummy_predictions). Never reads/writes
+# `telemetry`, `stops_config`, `routes_config`, or any real-device table.
+# ---------------------------------------------------------------------------
+
+@app.route("/dummy/buses", methods=["GET"])
+def dummy_buses():
+    return jsonify({"status": "ok", "data": dummy_data.buses_meta()}), 200
+
+
+@app.route("/dummy/buses/live", methods=["GET"])
+def dummy_buses_live():
+    return jsonify({"status": "ok", "data": dummy_data.all_live()}), 200
+
+
+@app.route("/dummy/history/dates", methods=["GET"])
+def dummy_history_dates():
+    rows = query("SELECT DISTINCT date FROM dummy_history ORDER BY date DESC")
+    dates = [r["date"].isoformat() for r in rows]
+    return jsonify({"status": "ok", "data": dates}), 200
+
+
+@app.route("/dummy/history", methods=["GET"])
+def dummy_history():
+    date = request.args.get("date")
+    dev_id = request.args.get("dev_id")
+    if not date:
+        return jsonify({"status": "error", "message": "date required (YYYY-MM-DD)."}), 400
+    if dev_id:
+        rows = query("SELECT * FROM dummy_history WHERE date=%s AND dev_id=%s", (date, dev_id))
+    else:
+        rows = query("SELECT * FROM dummy_history WHERE date=%s ORDER BY dev_id", (date,))
+    return jsonify({"status": "ok", "data": rows}), 200
+
+
+@app.route("/dummy/predictions", methods=["GET"])
+def dummy_predictions():
+    dev_id = request.args.get("dev_id")
+    if not dev_id:
+        return jsonify({"status": "error", "message": "dev_id required."}), 400
+    rows = query("SELECT * FROM dummy_predictions WHERE dev_id=%s ORDER BY date", (dev_id,))
+    return jsonify({"status": "ok", "data": rows}), 200
+
+
+@app.route("/dummy/insights", methods=["GET"])
+def dummy_insights():
+    """AI-generated (Kimi) or rule-based fallback narrative summary for a
+    dummy bus's historical or forecast report. Never touches real-device
+    tables; reads only dummy_history / dummy_predictions."""
+    dev_id = request.args.get("dev_id")
+    kind = request.args.get("kind", "historical")
+    force = request.args.get("regenerate") == "1"
+
+    cfg = dummy_data.BUS_BY_ID.get(dev_id)
+    if not cfg:
+        return jsonify({"status": "error", "message": f"Unknown dummy bus '{dev_id}'."}), 404
+
+    hist_rows = query("SELECT * FROM dummy_history WHERE dev_id=%s ORDER BY date", (dev_id,))
+    if not hist_rows:
+        return jsonify({"status": "error", "message": "No historical data for this bus yet."}), 404
+
+    if kind == "forecast":
+        pred_rows = query("SELECT * FROM dummy_predictions WHERE dev_id=%s ORDER BY date", (dev_id,))
+        result = summary_service.get_forecast_summary(
+            dev_id, cfg["number"], cfg["route_name"], hist_rows, pred_rows, force_regenerate=force
+        )
+    else:
+        result = summary_service.get_historical_summary(
+            dev_id, cfg["number"], cfg["route_name"], hist_rows, force_regenerate=force
+        )
+
+    return jsonify({"status": "ok", "data": result}), 200
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     init_db()
+    dummy_data.init_dummy_db(DB_CONFIG)
+    dummy_data.seed_if_needed(DB_CONFIG)
 
     _ngrok_url = _start_ngrok(5000)
 
