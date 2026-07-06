@@ -712,17 +712,19 @@ bool http_post(const char* payload, int payloadLen) {
     sim_sendExpect("AT+HTTPTERM", "OK", 2000); return false;
   }
 
+  // Bind PDP context 1 (the data context we activated). NON-FATAL: many A7670C
+  // firmwares auto-use context 1 for HTTP and return ERROR to an explicit CID
+  // set — aborting here was silently blocking every POST. The module still uses
+  // context 1, so log the warning and carry on.
   r = sim_sendCapture("AT+HTTPPARA=\"CID\",1", 3000);
-  if (r.indexOf("OK") == -1) {
-    LOGF("[HTTP] Set CID failed: %s\n", r.c_str());
-    sim_sendExpect("AT+HTTPTERM", "OK", 2000); return false;
-  }
+  if (r.indexOf("OK") == -1)
+    LOGF("[HTTP] CID set warning (continuing on default ctx 1): %s\n", r.c_str());
 
+  // Content-Type header. NON-FATAL for the same reason — the server does not
+  // require it to parse the JSON body.
   r = sim_sendCapture("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 3000);
-  if (r.indexOf("OK") == -1) {
-    LOGF("[HTTP] Set CONTENT failed: %s\n", r.c_str());
-    sim_sendExpect("AT+HTTPTERM", "OK", 2000); return false;
-  }
+  if (r.indexOf("OK") == -1)
+    LOGF("[HTTP] CONTENT warning (continuing): %s\n", r.c_str());
 
   // Bind SSL context 0 to the HTTP session (this is what actually enables HTTPS
   // on the A7670C). Non-fatal — some firmware auto-binds from the https:// URL.
