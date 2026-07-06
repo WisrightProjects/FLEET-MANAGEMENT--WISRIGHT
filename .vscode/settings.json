@@ -1,5 +1,12 @@
 {
   "files.associations": {
     "*.ino": "cpp"
-  }
+  },
+
+  // The firmware is compiled by the Arduino IDE, which is the real validator.
+  // VS Code's C/C++ IntelliSense cannot fully resolve the ESP32 SDK headers, so
+  // it reports false errors on Arduino built-ins. Disable its error squiggles /
+  // problem reporting (autocomplete + go-to-definition still work). This is why
+  // the firmware .ino files show 0 problems even though the Arduino build is clean.
+  "C_Cpp.errorSquiggles": "disabled"
 }
