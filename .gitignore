@@ -5,3 +5,11 @@ __pycache__/
 *.pyd
 .env
 *.log
+
+# Arduino / ESP32 build output (generated — the .ino source stays tracked)
+build/
+*.ino.cpp
+*.elf
+*.hex
+*.bin
+.pio/
