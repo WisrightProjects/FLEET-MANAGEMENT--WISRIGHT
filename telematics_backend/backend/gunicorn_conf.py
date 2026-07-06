@@ -11,7 +11,7 @@ WHY workers = 1
     which worker a request lands on. We therefore run a SINGLE worker and use
     threads for concurrency. Each DB query opens/closes its own connection
     (see get_db/query/execute), and the caches/rate-limiter use locks, so the
-    threaded model is safe.
+    threaded model is safe
 
     This is fine for a prototype / small fleet. To scale horizontally later,
     move that in-memory state into MySQL or Redis, then raise the worker count.
