@@ -543,6 +543,12 @@ def validate(data, schema):
     for field, expected in schema.items():
         if field not in data:
             return False, f"Missing required field: '{field}'."
+        
+        # In Python, bool is a subclass of int. Reject booleans if they are passed instead of integers.
+        is_expected_bool = (expected is bool) or (isinstance(expected, tuple) and bool in expected)
+        if isinstance(data[field], bool) and not is_expected_bool:
+            return False, f"Field '{field}' cannot be a boolean."
+
         if not isinstance(data[field], expected):
             t = expected.__name__ if isinstance(expected, type) else " or ".join(x.__name__ for x in expected)
             return False, f"Field '{field}' must be of type {t}."
@@ -572,6 +578,10 @@ def dashboard_js_route():
     resp = send_from_directory(_FRONTEND_DIR, "dashboard.js")
     resp.headers["Content-Type"] = "application/javascript; charset=utf-8"
     return resp
+
+@app.route("/qa_test_script.html")
+def qa_test_script_route():
+    return send_from_directory(_FRONTEND_DIR, "qa_test_script.html")
 
 
 # ---------------------------------------------------------------------------

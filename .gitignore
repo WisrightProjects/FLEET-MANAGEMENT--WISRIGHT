@@ -13,3 +13,7 @@ build/
 *.hex
 *.bin
 .pio/
+
+playwright-report/
+test-results/
+playwright_report.json

@@ -1,0 +1,18 @@
+{
+  "name": "fleet-qa-playwright",
+  "version": "1.0.0",
+  "description": "Playwright QA Test Suite — IoT Fleet Management System Module 4",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:report": "playwright show-report",
+    "test:api": "playwright test tests/api.spec.js",
+    "test:dashboard": "playwright test tests/dashboard.spec.js",
+    "test:smoke": "playwright test tests/smoke.spec.js",
+    "test:all": "playwright test --reporter=html"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}

@@ -1,6 +1,7 @@
 /* ── RESET ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{font-family:'Space Grotesk','Segoe UI',Arial,sans-serif;min-height:100vh}
+body{overflow-x:hidden}
 button{cursor:pointer;font-family:inherit}
 
 /* ── VIEWS ── */
@@ -116,7 +117,7 @@ button{cursor:pointer;font-family:inherit}
 .trips-title::after{content:'';flex:1;height:1px;background:#E5E7EB}
 .trips-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  grid-template-columns:repeat(auto-fill, minmax(250px, 1fr));
   gap:16px;
 }
 
@@ -305,7 +306,7 @@ tbody td b{color:#fafaf9}
 .pdot{width:7px;height:7px;border-radius:50%;background:#3fb950;animation:pa 1.4s infinite}
 @keyframes pa{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
 
-.trk-body{display:grid;grid-template-columns:1fr 310px;flex:1;min-height:0;overflow:hidden}
+.trk-body{display:grid;grid-template-columns:1fr 250px;flex:1;min-height:0;overflow:hidden}
 .map-col{position:relative;display:flex;flex-direction:column}
 #liveMap{width:100%;flex:1;min-height:300px}
 
@@ -571,7 +572,7 @@ tbody td b{color:#fafaf9}
 
 /* ── RESPONSIVE ── */
 @media(max-width:900px){
-  .trk-body{grid-template-columns:1fr 270px}
+  
 }
 @media(max-width:680px){
   .trk-body{display:flex;flex-direction:column}
@@ -650,7 +651,7 @@ tbody td b{color:#fafaf9}
 
 /* Body split */
 .bt-body{
-  display:grid;grid-template-columns:1fr 380px;
+  display:grid;grid-template-columns:1fr 280px;
   height:calc(100vh - 118px);overflow:hidden;
 }
 
