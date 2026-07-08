@@ -5,3 +5,8 @@ __pycache__/
 *.pyd
 .env
 *.log
+
+playwright-report/
+test-results/
+playwright_report.json
+

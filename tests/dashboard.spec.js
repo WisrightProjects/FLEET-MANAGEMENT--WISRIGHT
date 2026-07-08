@@ -399,7 +399,7 @@ test.describe('🔐 Security Tests', () => {
         dev_id: 'SEC_TEST_PW',
         lat: 13.0,
         lon: 80.0,
-        speed_kmh: 0,
+        speed_kmh: 0, sos_active: 0,
         sos_active: true,  // boolean instead of int
       },
     });
@@ -416,7 +416,7 @@ test.describe('🔐 Security Tests', () => {
           dev_id: devId,
           lat: 13.0,
           lon: 80.0,
-          speed_kmh: 0,
+          speed_kmh: 0, sos_active: 0,
           sos_active: 0,
         },
       });

@@ -304,11 +304,13 @@ def all_live() -> list:
             distance_covered = cfg["base_distance"]
             eta_min = 0
 
+        sos = 0
         out.append({
             "dev_id": cfg["dev_id"],
             "lat": round(lat, 6),
             "lon": round(lon, 6),
             "speed_kmh": round(speed, 1),
+            "sos_active": sos,
             "status": status,
             "distance_km": distance_covered,
             "eta_min": eta_min,
