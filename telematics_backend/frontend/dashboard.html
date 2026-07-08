@@ -32,6 +32,7 @@
     </div>
     <div id="backendBadge" style="font-size:.65rem;font-weight:600;color:#fca5a5;white-space:nowrap;margin-left:8px">🔴 Offline</div>
     <button class="bustest-nav-btn" onclick="openBusTest()" title="Open Bus Live Test panel">🚌 Bus Test</button>
+    <button class="bustest-nav-btn" onclick="openQaTest()" title="Open QA Dashboard" style="margin-left: 8px; background: #6366f1; border-color: #4f46e5;">✅ QA Test</button>
   </nav>
 
   <div class="hero">
@@ -45,10 +46,10 @@
   </div>
 
   <div class="stats-strip">
-    <div class="stat-item"><div class="stat-num" id="sBusTotal">—</div><div class="stat-lbl">Buses Active</div></div>
-    <div class="stat-item"><div class="stat-num" id="sMoving">—</div><div class="stat-lbl">Moving</div></div>
-    <div class="stat-item"><div class="stat-num" id="sStopped">—</div><div class="stat-lbl">Stopped</div></div>
-    <div class="stat-item"><div class="stat-num" id="sSos" style="color:#B91C1C">—</div><div class="stat-lbl">SOS Alert</div></div>
+    <div class="stat-item" id="openBusListBtn" onclick="goBusList()" style="cursor:pointer" title="View all buses"><div class="stat-num" id="sBusTotal">—</div><div class="stat-lbl">Buses Active</div></div>
+    <div class="stat-item" onclick="goBusList()" style="cursor:pointer" title="View moving buses"><div class="stat-num" id="sMoving">—</div><div class="stat-lbl">Moving</div></div>
+    <div class="stat-item" onclick="goBusList()" style="cursor:pointer" title="View stopped buses"><div class="stat-num" id="sStopped">—</div><div class="stat-lbl">Stopped</div></div>
+    <div class="stat-item" onclick="goBusList()" style="cursor:pointer" title="View SOS alerts"><div class="stat-num" id="sSos" style="color:#B91C1C">—</div><div class="stat-lbl">SOS Alert</div></div>
   </div>
 
   <div class="date-row" id="dateRow"></div>
@@ -377,6 +378,22 @@
 
   <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Bus Live Test — ESP32 + A7670C 4G</div>
 </div><!-- /#busTestView -->
+
+<!-- ══════════════════════════════════
+     VIEW 6 — QA TEST DASHBOARD
+══════════════════════════════════ -->
+<div id="qaTestView" class="view">
+  <div class="bt-topbar">
+    <button class="back-btn" onclick="leaveQaTest()">← Back</button>
+    <div class="bt-title-block">
+      <span class="bt-title">✅ QA Test Dashboard</span>
+      <span class="bt-subtitle">Manual & Automated Test Tracking</span>
+    </div>
+  </div>
+  <div style="width:100%; height:calc(100vh - 60px);">
+    <iframe src="qa_test_script.html" style="width:100%; height:100%; border:none;"></iframe>
+  </div>
+</div>
 
 <script src="dashboard.js" defer></script>
 </body>
