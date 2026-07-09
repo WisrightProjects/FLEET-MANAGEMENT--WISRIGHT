@@ -583,6 +583,10 @@ def dashboard_js_route():
 def qa_test_script_route():
     return send_from_directory(_FRONTEND_DIR, "qa_test_script.html")
 
+@app.route("/mock")
+def mock_dashboard():
+    return send_from_directory(_FRONTEND_DIR, "mock.html")
+
 
 # ---------------------------------------------------------------------------
 # Health & info
