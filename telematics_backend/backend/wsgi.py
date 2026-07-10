@@ -25,7 +25,7 @@ import time
 import mysql.connector
 
 import dummy_data
-from app import app, init_db, DB_CONFIG  # noqa: F401  (app imported for gunicorn)
+from app import app, init_db, DB_CONFIG, start_background_watcher  # noqa: F401  (app imported for gunicorn)
 
 
 def _init_with_retry(attempts: int = 30, delay: float = 2.0) -> None:
@@ -54,3 +54,4 @@ def _init_with_retry(attempts: int = 30, delay: float = 2.0) -> None:
 
 
 _init_with_retry()
+start_background_watcher()  # online/offline + auto-trip-end polling (app.py has no __main__ under gunicorn)

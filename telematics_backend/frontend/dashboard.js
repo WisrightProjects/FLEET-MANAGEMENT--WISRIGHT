@@ -18,6 +18,56 @@ const BACKEND = BACKEND_OVERRIDE || (
 );
 let backendOnline = false;
 
+/* ── Server-side device online/offline status via SSE (no polling needed) ──
+   Falls back gracefully: if the stream can't connect, the tracker badge just
+   stays "Unknown" — it never blocks or breaks the rest of the dashboard. */
+const deviceStatus = {}; // dev_id -> {status:'online'|'offline', last_seen}
+
+function _applyDeviceStatus(dev_id, status, last_seen) {
+  deviceStatus[dev_id] = { status, last_seen };
+  if (curBus === dev_id) _renderDeviceStatusBadge(dev_id);
+  if (btBusId === dev_id) _renderBustestServerBadge(dev_id);
+}
+
+// Shared renderer: writes the server-authoritative online/offline state
+// (green/red dot, "Device Online"/"Device Offline" text) into any badge
+// element by id. Used by both the tracker view and the Bus Live Test view
+// so the two never disagree about a device's real status.
+function _paintStatusBadge(el, dev_id) {
+  if (!el) return;
+  const info = deviceStatus[dev_id];
+  if (!info) { el.textContent = '● Unknown'; el.style.background = '#30363d'; el.style.color = '#8b949e'; return; }
+  if (info.status === 'online') {
+    el.textContent = '🟢 Device Online';
+    el.style.background = 'rgba(63,185,80,.15)'; el.style.color = '#3fb950';
+  } else {
+    el.textContent = '🔴 Device Offline';
+    el.style.background = 'rgba(248,81,73,.15)'; el.style.color = '#f85149';
+  }
+}
+
+function _renderDeviceStatusBadge(dev_id) {
+  _paintStatusBadge(document.getElementById('deviceStatusBadge'), dev_id);
+}
+
+function _renderBustestServerBadge(dev_id) {
+  _paintStatusBadge(document.getElementById('btServerStatus'), dev_id);
+}
+
+function connectDeviceStatusStream() {
+  try {
+    const es = new EventSource(`${BACKEND}/device/status/stream`);
+    es.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d && d.dev_id) _applyDeviceStatus(d.dev_id, d.status, d.last_seen);
+      } catch {}
+    };
+    es.onerror = () => { es.close(); setTimeout(connectDeviceStatusStream, 5000); };
+  } catch { /* EventSource unsupported — badge just stays "Unknown" */ }
+}
+connectDeviceStatusStream();
+
 /* ── Bus display metadata — populated dynamically from real device IDs ── */
 const BMETA = {};
 const BUS_COLORS = ['#58a6ff','#3fb950','#d29922','#f85149','#f97316','#ec4899','#a5b4fc','#34d399'];
@@ -570,6 +620,7 @@ function openTracker(id) {
   document.getElementById('trkSub').textContent  = m.route;
   location.hash = id;
   showV('trackerView');
+  _renderDeviceStatusBadge(id);
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const b = sim[id];
@@ -991,10 +1042,13 @@ async function showTripLog() {
   content.innerHTML = '<div style="color:#8b949e;padding:24px;font-size:.82rem">Loading trips…</div>';
 
   try {
-    const devId = curBus;
-    const url   = devId
-      ? `${BACKEND}/trips?dev_id=${devId}&limit=30`
-      : `${BACKEND}/trips?limit=30`;
+    const devId  = curBus;
+    const q      = document.getElementById('tripSearchIn')?.value.trim() || '';
+    const sort   = document.getElementById('tripSortSel')?.value || 'start_time';
+    const params = new URLSearchParams({ limit: '30', sort, order: 'desc' });
+    if (devId) params.set('dev_id', devId);
+    if (q)     params.set('q', q);
+    const url = `${BACKEND}/trips?${params.toString()}`;
     const r = await fetch(url, {signal: AbortSignal.timeout(4000)});
     const d = await r.json();
     const trips = d.data || [];
@@ -1017,15 +1071,18 @@ async function showTripLog() {
       const offBadge = t.off_route_count > 0
         ? `<span class="tlog-badge offroute">⚠ ${t.off_route_count} off-route</span>`
         : '';
+      const autoBadge = t.auto
+        ? '<span class="tlog-badge" style="background:rgba(139,148,158,.15);color:#8b949e">⚙ Auto</span>'
+        : '';
       return `<div class="tlog-row" onclick="showTripSummary(${t.id})">
         <div class="tlog-left">
-          <div class="tlog-route">${t.route_name}</div>
+          <div class="tlog-route">${t.route_name} <span style="font-weight:400;color:#6b7280;font-size:.72rem">(${t.dev_id})</span></div>
           <div class="tlog-meta">
             ${new Date(t.start_time*1000).toLocaleString('en-IN')}
             &nbsp;·&nbsp; ${dur}
             &nbsp;·&nbsp; ${(+t.total_km||0).toFixed(2)} km
           </div>
-          <div class="tlog-badges">${badge}${offBadge}</div>
+          <div class="tlog-badges">${badge}${autoBadge}${offBadge}</div>
         </div>
         <div class="tlog-chev">›</div>
       </div>`;
@@ -1052,8 +1109,46 @@ async function showTripSummary(tripId) {
   }
 }
 
+let _tripRouteMap = null;
+
+function _renderTripRouteMap(points, autoStops) {
+  const mapEl = document.getElementById('tripRouteMap');
+  if (!mapEl) return;
+  if (_tripRouteMap) { _tripRouteMap.remove(); _tripRouteMap = null; }
+
+  if (!points || points.length < 2) {
+    mapEl.innerHTML = '<div style="padding:30px;text-align:center;color:#8b949e;font-size:.8rem">Not enough GPS points recorded for this trip yet.</div>';
+    return;
+  }
+
+  _tripRouteMap = L.map('tripRouteMap', { zoomControl: true, preferCanvas: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(_tripRouteMap);
+
+  const latlngs = points.map(p => [p.lat, p.lon]);
+  const line = L.polyline(latlngs, { color: '#3b82f6', weight: 4, opacity: 0.85 }).addTo(_tripRouteMap);
+
+  L.marker(latlngs[0], {
+    icon: L.divIcon({ className: '', html: '<div style="background:#3fb950;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.4)"></div>' })
+  }).addTo(_tripRouteMap).bindTooltip('Start', { permanent: false });
+
+  L.marker(latlngs[latlngs.length - 1], {
+    icon: L.divIcon({ className: '', html: '<div style="background:#f85149;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.4)"></div>' })
+  }).addTo(_tripRouteMap).bindTooltip('End', { permanent: false });
+
+  (autoStops || []).forEach(s => {
+    const durTxt = s.duration_sec ? fmtDuration(s.duration_sec) : 'ongoing';
+    L.marker([s.lat, s.lon], {
+      icon: L.divIcon({ className: '', html: '<div style="background:#d29922;width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.4)"></div>' })
+    }).addTo(_tripRouteMap).bindPopup(`<b>Stopped Here</b><br>Duration: ${durTxt}`);
+  });
+
+  _tripRouteMap.fitBounds(line.getBounds(), { padding: [24, 24] });
+  setTimeout(() => _tripRouteMap && _tripRouteMap.invalidateSize(), 60);
+}
+
 function _renderTripSummary(data, el) {
-  const {trip, stops, presence, off_route} = data;
+  const {trip, stops, presence, off_route, points, auto_stops} = data;
   const dur      = trip.end_time ? fmtDuration(trip.end_time - trip.start_time) : 'Ongoing';
   const totalPax = presence.filter(p => p.event_type === 'board').reduce((s, p) => s + (+p.count||0), 0);
 
@@ -1117,7 +1212,26 @@ function _renderTripSummary(data, el) {
       <div><b>End:</b> ${trip.end_time ? new Date(trip.end_time*1000).toLocaleString('en-IN') : '—'}</div>
       <div><b>Device:</b> ${trip.dev_id}</div>
       <div><b>Status:</b> <span style="color:${trip.status==='active'?'#3fb950':'#8b949e'}">${trip.status}</span></div>
+      <div><b>Detection:</b> ${trip.auto ? '⚙ Auto (device online/offline)' : '▶ Manual'}</div>
     </div>
+
+    <div class="sum-title">🗺 Travelled Route ${(auto_stops||[]).length ? `&middot; ${auto_stops.length} stop(s) detected` : ''}</div>
+    <div id="tripRouteMap" style="width:100%;height:340px;border-radius:10px;overflow:hidden;margin:0 0 16px;background:#161b22"></div>
+
+    ${(auto_stops && auto_stops.length) ? `
+    <div class="sum-title">🅿 Detected Stops (dwell-based)</div>
+    <div class="tbl-wrap" style="margin:0 0 16px">
+      <table>
+        <thead><tr><th>#</th><th>Location</th><th>Start</th><th>End</th><th>Duration</th></tr></thead>
+        <tbody>${auto_stops.map((s,i) => `<tr>
+          <td>${i+1}</td>
+          <td>${(+s.lat).toFixed(5)}, ${(+s.lon).toFixed(5)}</td>
+          <td>${fmtTime(s.start_time)}</td>
+          <td>${s.end_time ? fmtTime(s.end_time) : '<span style="color:#3fb950">Ongoing</span>'}</td>
+          <td>${s.duration_sec != null ? fmtDuration(s.duration_sec) : '—'}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
 
     <div class="sum-title">📍 Mandatory Stop Log</div>
     <div class="tbl-wrap" style="margin:0 0 16px">
@@ -1148,11 +1262,21 @@ function _renderTripSummary(data, el) {
         <tbody>${presRows}</tbody>
       </table>
     </div>` : ''}`;
+
+  _renderTripRouteMap(points, auto_stops);
 }
+
+let _tripLogReturnView = null; // set by bustest_showTrips() to return to Bus Live Test instead
 
 function leaveTripLog() {
   const sub = document.getElementById('tripLogSub');
   if (sub) sub.textContent = 'Route history & passenger data';
+  if (_tripLogReturnView === 'busTestView') {
+    _tripLogReturnView = null;
+    curBus = null;
+    showV('busTestView');
+    return;
+  }
   if (curBus) showV('trackerView');
   else goHome();
 }
@@ -1185,9 +1309,25 @@ function bustest_start() {
   bustest_stop();
   btBusId = (document.getElementById('btBusIdInput') || {}).value || 'BUS01';
   btTrailPts = [];
+  _renderBustestServerBadge(btBusId); // show cached status (if any) immediately
+  // One-shot REST fetch as a fallback in case the SSE stream hasn't delivered
+  // this dev_id yet (e.g. it connected before this device ever POSTed) — the
+  // stream still drives all *live* updates afterwards, this just seeds it.
+  fetch(`${BACKEND}/device/status/${encodeURIComponent(btBusId)}`, {signal: AbortSignal.timeout(2500)})
+    .then(r => r.json())
+    .then(j => { if (j && j.data) _applyDeviceStatus(btBusId, j.data.status, j.data.last_seen); })
+    .catch(() => {});
   bustest_refresh();
   btTickId = setInterval(bustest_refresh, 5000);
   _btCountdownTick();
+}
+
+// Opens Trip History scoped to the device currently being tested here, and
+// remembers to bring the user back to Bus Live Test (not the tracker/home).
+function bustest_showTrips() {
+  _tripLogReturnView = 'busTestView';
+  curBus = btBusId;
+  showTripLog();
 }
 
 function bustest_stop() {

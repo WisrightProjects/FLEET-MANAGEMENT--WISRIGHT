@@ -110,6 +110,7 @@
       <div class="trk-name" id="trkName">—</div>
       <div class="trk-sub"  id="trkSub">—</div>
     </div>
+    <div id="deviceStatusBadge" style="font-size:.7rem;font-weight:700;padding:4px 10px;border-radius:20px;background:#30363d;color:#8b949e;margin-left:8px;white-space:nowrap">● Unknown</div>
     <div class="live-pill"><span class="pdot"></span> LIVE</div>
     <button id="tripActionBtn" class="trip-start-btn" onclick="tripAction()">▶ Start Trip</button>
     <button class="trips-log-btn" onclick="showTripLog()">📋 Trips</button>
@@ -260,6 +261,16 @@
     </div>
     <button class="trip-refresh-btn" onclick="showTripLog()">🔄 Refresh</button>
   </div>
+  <div style="display:flex;gap:8px;align-items:center;padding:0 14px 10px;flex-wrap:wrap">
+    <input id="tripSearchIn" type="text" placeholder="🔍 Search route or bus…" oninput="showTripLog()"
+           style="flex:1;min-width:180px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:.78rem"/>
+    <select id="tripSortSel" onchange="showTripLog()"
+            style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:.75rem">
+      <option value="start_time">Latest first</option>
+      <option value="duration">Longest duration</option>
+      <option value="distance">Longest distance</option>
+    </select>
+  </div>
   <div id="tripLogContent" style="padding:16px 14px"></div>
   <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Trip Tracking System</div>
 </div>
@@ -281,11 +292,16 @@
       <input id="btBusIdInput" type="text" class="bt-id-input" value="BUS01" placeholder="Bus ID…"/>
       <button class="bt-go-btn" onclick="bustest_start()">Track ▶</button>
     </div>
+    <button class="trips-log-btn" onclick="bustest_showTrips()" title="View trip history for this device" style="margin-left:8px">📋 Trips</button>
     <div class="live-pill" style="margin-left:8px"><span class="pdot"></span> LIVE</div>
   </div>
 
   <!-- Status bar -->
   <div class="bt-status-bar">
+    <!-- Server-side (SSE) truth: mirrors the /device/status/stream state exactly,
+         independent of the freshness heuristic below. Requirement: online/offline
+         must be decided entirely server-side and push instantly, no refresh. -->
+    <span id="btServerStatus" style="font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:#30363d;color:#8b949e;margin-right:8px">● Unknown</span>
     <span id="btStatus" class="bt-status bt-offline">● No signal</span>
     <span id="btLastSeen" class="bt-lastseen">Waiting for device…</span>
     <span id="btSosAlert" class="bt-sos-flash" style="display:none">🚨 SOS ACTIVE</span>
