@@ -263,6 +263,7 @@ setInterval(tick, 1000); tick();
 
 function buildDates() {
   const row = document.getElementById('dateRow');
+  row.innerHTML = '';
   const today = new Date();
   const ord = n => { const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
   const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];

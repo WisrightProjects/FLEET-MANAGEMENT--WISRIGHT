@@ -82,7 +82,7 @@ button{cursor:pointer;font-family:inherit}
   background:#fff;border-bottom:1px solid #E5E7EB;
 }
 .stat-item{
-  padding:16px 14px;text-align:center;
+  padding:10px 14px;text-align:center;
   border-right:1px solid #E5E7EB;
   display:flex;flex-direction:column;align-items:center;gap:4px;
 }
@@ -108,7 +108,7 @@ button{cursor:pointer;font-family:inherit}
 .date-row button.dr-today{background:#FEE2E2;color:#B91C1C;font-weight:700}
 .date-row button.dr-sel,.date-row button:hover{background:#B91C1C;color:#fff}
 
-.trips-section{padding:24px 16px;background:#F9FAFB}
+.trips-section{padding:14px 16px;background:#F9FAFB}
 .trips-title{
   font-size:.62rem;font-weight:700;text-transform:uppercase;
   letter-spacing:2px;color:#9CA3AF;margin-bottom:16px;
@@ -117,7 +117,7 @@ button{cursor:pointer;font-family:inherit}
 .trips-title::after{content:'';flex:1;height:1px;background:#E5E7EB}
 .trips-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns:repeat(auto-fit, minmax(350px, 1fr));
   gap:16px;
 }
 

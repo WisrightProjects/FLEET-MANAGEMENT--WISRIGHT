@@ -6,7 +6,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const BASE = 'https://fms.wisright.com';
+const BASE = process.env.BASE_URL || 'http://127.0.0.1:5000';
 const DEV  = 'PW_TEST_DEVICE_' + Date.now(); // unique device per run
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
