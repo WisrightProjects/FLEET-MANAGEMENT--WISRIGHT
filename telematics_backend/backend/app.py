@@ -786,9 +786,6 @@ def dashboard_js_route():
     resp.headers["Content-Type"] = "application/javascript; charset=utf-8"
     return resp
 
-@app.route("/qa_test_script.html")
-def qa_test_script_route():
-    return send_from_directory(_FRONTEND_DIR, "qa_test_script.html")
 
 @app.route("/mock")
 def mock_dashboard():

@@ -2659,7 +2659,3 @@ async function onHistDateChange() {
   }
 }
 
-
-
-function openQaTest() { document.querySelectorAll('.view').forEach(el => el.classList.remove('active')); document.getElementById('qaTestView').classList.add('active'); }
-function leaveQaTest() { document.querySelectorAll('.view').forEach(el => el.classList.remove('active')); document.getElementById('homeView').classList.add('active'); }
