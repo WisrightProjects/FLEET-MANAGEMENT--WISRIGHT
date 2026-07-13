@@ -91,42 +91,11 @@ _routes_ts:   float        = 0.0
 _CACHE_TTL = 60.0
 _cache_lock = threading.Lock()
 
-# Spatial grid index over stops_config, rebuilt alongside _stops_cache.
-# run_geofence() used to do a linear O(n) scan over every configured stop on
-# every telemetry packet (the hottest endpoint in the app). Grid cell size is
-# chosen larger than any realistic stop radius_m, so the nearest stop to any
-# point is always within that point's own cell or its 8 neighbors — this
-# turns the per-packet lookup into O(k) where k = stops in a 3x3 cell window,
-# independent of the total stop count n. Falls back to a full scan (still
-# correct, just O(n)) on the rare case the neighborhood comes up empty.
-_STOP_GRID_DEG = 0.01  # ~1.1 km at the equator — comfortably > any stop radius_m in use
-_stop_grid_cache: dict | None = None  # {(cell_x, cell_y): [stop, ...]}
-
-
-def _grid_cell(lat: float, lon: float) -> tuple:
-    return (math.floor(lat / _STOP_GRID_DEG), math.floor(lon / _STOP_GRID_DEG))
-
-
-def _build_stop_grid(stops: list) -> dict:
-    grid: dict = {}
-    for stop in stops:
-        grid.setdefault(_grid_cell(stop["lat"], stop["lon"]), []).append(stop)
-    return grid
-
-
-def _nearby_stops(lat: float, lon: float, stops: list, grid: dict) -> list:
-    cx, cy = _grid_cell(lat, lon)
-    candidates = []
-    for dx in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            candidates.extend(grid.get((cx + dx, cy + dy), []))
-    return candidates or stops  # empty neighborhood (shouldn't happen) — fall back to full scan
-
 
 def _invalidate_stops():
-    global _stops_cache, _stops_ts, _stop_grid_cache
+    global _stops_cache, _stops_ts
     with _cache_lock:
-        _stops_cache = None; _stops_ts = 0.0; _stop_grid_cache = None
+        _stops_cache = None; _stops_ts = 0.0
 
 
 def _invalidate_routes():
@@ -146,17 +115,7 @@ def _get_stops() -> list:
     with _cache_lock:
         _stops_cache = rows or []
         _stops_ts = now
-        global _stop_grid_cache
-        _stop_grid_cache = _build_stop_grid(_stops_cache)
     return _stops_cache
-
-
-def _get_stop_grid() -> dict:
-    """Spatial grid index over the cached stops — see comment above
-    _STOP_GRID_DEG. Kept in lockstep with _get_stops()'s 60s TTL."""
-    _get_stops()  # ensures _stop_grid_cache is populated/fresh as a side effect
-    with _cache_lock:
-        return _stop_grid_cache or {}
 
 
 def _get_routes() -> dict:
@@ -504,13 +463,8 @@ def run_geofence(dev_id: str, lat: float, lon: float, ts: float):
     if not stops:
         return  # No stops configured yet — geofencing inactive
 
-    # O(k) nearest-stop lookup via the spatial grid (k = stops in this point's
-    # 3x3 cell neighborhood) instead of an O(n) scan over every stop — see
-    # _STOP_GRID_DEG comment above. Was previously a straight `for stop in stops`.
-    candidates = _nearby_stops(lat, lon, stops, _get_stop_grid())
-
     nearest, nearest_dist = None, float("inf")
-    for stop in candidates:
+    for stop in stops:
         d = haversine_m(lat, lon, stop["lat"], stop["lon"])
         if d < nearest_dist:
             nearest_dist, nearest = d, stop
