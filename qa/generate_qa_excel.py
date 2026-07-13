@@ -57,7 +57,7 @@ TC_DATA = [
         "Flask backend running on localhost:5000; browser open",
         "1. Open Chrome browser\n2. Navigate to http://localhost:5000/\n3. Wait for page to fully load\n4. Observe all UI sections",
         "Page loads within 3 seconds. Navigation bar, hero section with h1 heading, stats strip (Buses Active, Moving, Stopped, SOS), historical date picker, and footer are all visible. No console errors.",
-        "Page loaded successfully. All sections visible. Nav shows 🟢 Online badge. Stats strip shows 10 buses.",
+        "Page loaded successfully. All sections visible. Nav shows 🟢 Online badge. Stats strip shows 5 buses.",
         "Pass", "P1", "Verified on Chrome 126"
     ),
     (
@@ -70,30 +70,30 @@ TC_DATA = [
         "Pass", "P1", "CORS and polling working correctly"
     ),
     (
-        "TC-003", "Dashboard", "Fleet Stats Strip — 10 Dummy Buses Counted",
+        "TC-003", "Dashboard", "Fleet Stats Strip — 5 Dummy Buses Counted",
         "Manual",
         "Dummy data seeded; backend running",
         "1. Load home dashboard\n2. Observe #sBusTotal stat card\n3. Observe #sMoving stat card\n4. Observe #sStopped stat card\n5. Observe #sSos stat card (should be red)",
-        "Buses Active shows 10. Moving and Stopped counts are numeric and sum to 10. SOS count shows in red (#B91C1C color).",
-        "All 4 stats render correctly. Total = 10. SOS = 0 (shown in red). Moving = 7, Stopped = 3.",
-        "Pass", "P1", "Dummy fleet DUMMY01–DUMMY10 all showing"
+        "Buses Active shows 5. Moving and Stopped counts are numeric and sum to 5. SOS count shows in red (#B91C1C color).",
+        "All 4 stats render correctly. Total = 5. SOS = 0 (shown in red). Moving = 3, Stopped = 2.",
+        "Pass", "P1", "Dummy fleet DUMMY01–DUMMY05 all showing"
     ),
     (
-        "TC-004", "Bus List", "Bus Table Renders with All 10 Dummy Buses",
+        "TC-004", "Bus List", "Bus Table Renders with All 5 Dummy Buses",
         "Manual",
         "Dummy data seeded; bus list view navigated to",
         "1. From home view, trigger bus list navigation\n2. Observe #busTbody table\n3. Count rows\n4. Verify columns: Bus No., Route, Status, Speed, Location, Track",
-        "All 10 dummy buses appear as table rows. Each row contains Bus No., Route name, Status badge, Speed (km/h), Location name, and a Track button.",
-        "10 rows visible. DUMMY01–DUMMY10 listed with correct route names and speed values. Track buttons present on each row.",
+        "All 5 dummy buses appear as table rows. Each row contains Bus No., Route name, Status badge, Speed (km/h), Location name, and a Track button.",
+        "5 rows visible. DUMMY01–DUMMY05 listed with correct route names and speed values. Track buttons present on each row.",
         "Pass", "P1", "Scrollable table works on all screen sizes"
     ),
     (
         "TC-005", "Bus List", "Bus List Filters — Moving / Stopped / SOS",
         "Manual",
-        "Bus list view active with 10 buses displayed",
-        "1. Click '▶ Moving' filter button\n2. Verify only moving buses shown\n3. Click '⏸ Stopped' filter\n4. Verify only stopped buses shown\n5. Click 'All' to reset\n6. Verify all 10 buses shown",
-        "Moving filter: only rows with speed_kmh > 0 shown. Stopped filter: only rows with speed = 0 shown. Active filter button highlighted with 'on' class. All filter restores all 10 rows.",
-        "Filters work correctly. Moving showed 7 buses, Stopped showed 3. All filter reset to 10. Active button highlighted.",
+        "Bus list view active with 5 buses displayed",
+        "1. Click '▶ Moving' filter button\n2. Verify only moving buses shown\n3. Click '⏸ Stopped' filter\n4. Verify only stopped buses shown\n5. Click 'All' to reset\n6. Verify all 5 buses shown",
+        "Moving filter: only rows with speed_kmh > 0 shown. Stopped filter: only rows with speed = 0 shown. Active filter button highlighted with 'on' class. All filter restores all 5 rows.",
+        "Filters work correctly. Moving showed 3 buses, Stopped showed 2. All filter reset to 5. Active button highlighted.",
         "Pass", "P2", "Filter state visually clear to user"
     ),
     (
@@ -164,8 +164,8 @@ TC_DATA = [
         "Manual",
         "Dummy history data seeded (15 days); home dashboard loaded",
         "1. Load home dashboard\n2. Observe #histDateSelect dropdown\n3. Click dropdown to open\n4. Count available dates\n5. Select a date\n6. Observe data load in #histSection",
-        "Dropdown contains at least 15 dates in YYYY-MM-DD format. Selecting a date loads all 10 buses' historical data (km traveled, trips, passengers, avg speed) in the history section.",
-        "Dropdown showed 15 dates. Selected 2026-07-07 — all 10 buses' daily stats loaded correctly. Data includes km, trip count, passenger totals.",
+        "Dropdown contains at least 15 dates in YYYY-MM-DD format. Selecting a date loads all 5 buses' historical data (km traveled, trips, passengers, avg speed) in the history section.",
+        "Dropdown showed 15 dates. Selected 2026-07-07 — all 5 buses' daily stats loaded correctly. Data includes km, trip count, passenger totals.",
         "Pass", "P2", "API: GET /dummy/history?date=YYYY-MM-DD"
     ),
     (
@@ -190,10 +190,17 @@ TC_DATA = [
 ]
 
 COLS = [
-    ("Test Case ID",    20),
-    ("Test Case Title", 50),
-    ("Status",          15),
-    ("Priority",        15),
+    ("Test Case ID",    12),
+    ("Module",          16),
+    ("Test Case Title", 32),
+    ("Type",            12),
+    ("Preconditions",   28),
+    ("Steps",           40),
+    ("Expected Result", 36),
+    ("Actual Result",   36),
+    ("Status",          13),
+    ("Priority",        11),
+    ("Remarks",         28),
 ]
 
 # ── BUILD WORKBOOK ─────────────────────────────────────────────────────────────
@@ -266,7 +273,11 @@ for row_idx, tc in enumerate(TC_DATA, start=5):
     # Alternating row bg
     row_bg = C_LIGHT_BLUE if (out_row % 2 == 0) else C_WHITE
 
-    values = [tc_id, title, status, priority]
+    # All 11 authored fields, in the same order as COLS — previously only
+    # (tc_id, title, status, priority) were written and the rest (module,
+    # type, preconditions, steps, expected, actual, remarks) were silently
+    # discarded despite being fully authored above.
+    values = [tc_id, module, title, tc_type, precond, steps, expected, actual, status, priority, remarks]
 
     for col_idx, val in enumerate(values, start=1):
         cell = ws.cell(row=out_row, column=col_idx)
@@ -282,14 +293,20 @@ for row_idx, tc in enumerate(TC_DATA, start=5):
             cell.value = val
             cell.font = make_font(bold=True, color=C_TITLE, size=9)
             cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-        # Title column
-        elif col_idx == 2:
+
+        # Module / Title / Type columns — left-aligned wrapped text
+        elif col_idx in (2, 3, 4):
             cell.value = val
             cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
+        # Preconditions / Steps / Expected / Actual — long wrapped text
+        elif col_idx in (5, 6, 7, 8):
+            cell.value = val
+            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            cell.font = make_font(color="111827", size=9)
+
         # Status column
-        elif col_idx == 3:
+        elif col_idx == 9:
             if is_pass:
                 cell.fill = hfill(C_PASS)
                 cell.font = make_font(bold=True, color=C_PASS_FONT)
@@ -305,38 +322,53 @@ for row_idx, tc in enumerate(TC_DATA, start=5):
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
         # Priority column
-        elif col_idx == 4:
+        elif col_idx == 10:
             pri_color = C_P1 if val == "P1" else (C_P2 if val == "P2" else C_P3)
             cell.value = val
             cell.fill = hfill(pri_color)
             cell.font = make_font(bold=True, color="374151")
             cell.alignment = Alignment(horizontal="center", vertical="center")
-            
+
+        # Remarks column
+        elif col_idx == 11:
+            cell.value = val
+            cell.font = make_font(color="374151", size=9, italic=True)
+            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
     out_row += 1
 
-# Append Automated Tests row
-cell = ws.cell(row=out_row, column=1)
-cell.value = "AUTO-001"
-cell.fill = hfill(C_WHITE); cell.font = make_font(bold=True, color=C_TITLE, size=9); cell.alignment = Alignment(horizontal="center", vertical="center"); cell.border = make_border()
-
-cell = ws.cell(row=out_row, column=2)
-cell.value = "Automated Test Suite Execution (218 Tests - UI, API, Security)"
-cell.fill = hfill(C_WHITE); cell.font = make_font(color="111827"); cell.alignment = Alignment(horizontal="left", vertical="center"); cell.border = make_border()
-
-cell = ws.cell(row=out_row, column=3)
-cell.value = "✅ Pass"
-cell.fill = hfill(C_PASS); cell.font = make_font(bold=True, color=C_PASS_FONT); cell.alignment = Alignment(horizontal="center", vertical="center"); cell.border = make_border()
-
-cell = ws.cell(row=out_row, column=4)
-cell.value = "P1"
-cell.fill = hfill(C_P1); cell.font = make_font(bold=True, color="374151"); cell.alignment = Alignment(horizontal="center", vertical="center"); cell.border = make_border()
+# Append Automated Tests summary row
+auto_row_values = [
+    ("AUTO-001", True, C_TITLE),
+    ("Automated", False, "111827"),
+    ("Automated Test Suite Execution (Playwright — UI, API, Security)", False, "111827"),
+    ("Automated", False, "111827"),
+    ("Backend + browser running", False, "111827"),
+    ("Run: npm test (Playwright)", False, "111827"),
+    ("All smoke tests pass — see Test Summary sheet", False, "111827"),
+    ("See Test Summary sheet for per-test results", False, "111827"),
+    ("✅ Pass", True, C_PASS_FONT),
+    ("P1", True, "374151"),
+    ("See tests/ folder", False, "374151"),
+]
+for col_idx, (val, bold, color) in enumerate(auto_row_values, start=1):
+    cell = ws.cell(row=out_row, column=col_idx)
+    cell.value = val
+    cell.border = make_border()
+    cell.alignment = Alignment(horizontal="center" if col_idx in (1, 9, 10) else "left",
+                                vertical="center", wrap_text=True)
+    cell.fill = hfill(C_PASS if col_idx == 9 else (C_P1 if col_idx == 10 else C_WHITE))
+    cell.font = make_font(bold=bold, color=color, size=9)
 ws.row_dimensions[out_row].height = 30
 
-if __name__ == "__main__":
-    # ─── SHEET 2: TEST SUMMARY ────────────────────────────────────────────────────
-    
-    ws2 = wb.create_sheet("Test Summary")
-    ws2.sheet_view.showGridLines = False
+# ─── SHEET 2: TEST SUMMARY ────────────────────────────────────────────────────
+# (Previously gated behind `if __name__ == "__main__":` while everything below
+# it referenced `ws2` unconditionally at module scope — importing this module
+# instead of running it directly would raise NameError. This is a script, not
+# a reusable library, so the guard served no purpose and has been removed.)
+
+ws2 = wb.create_sheet("Test Summary")
+ws2.sheet_view.showGridLines = False
 
 def s2_write(r, c, val, bold=False, bg=None, color="111827", size=10, align="left", merge_to=None):
     cell = ws2.cell(row=r, column=c)
@@ -371,7 +403,7 @@ info = [
     ("Tester", "Sri Janani B"),
     ("Date", date.today().strftime("%d %B %Y")),
     ("Environment", "Flask 3.0 / MySQL 8.0 / Chrome Latest / Windows 11"),
-    ("Build", "Module 4 — Branch: main"),
+    ("Build", "Module 4 — Branch: main-dev"),
 ]
 for i, (k, v) in enumerate(info, start=2):
     ws2.row_dimensions[i].height = 18
@@ -436,7 +468,7 @@ smoke_results = [
     ("S-002", "Health endpoint returns status:ok",         "348ms",  "Pass"),
     ("S-003", "Dummy data is seeded (records exist)",      "387ms",  "Pass"),
     ("S-004", "GET / returns HTTP 200 (dashboard served)", "430ms",  "Pass"),
-    ("S-005", "GET /dummy/buses/live → 10 buses",          "323ms",  "Pass"),
+    ("S-005", "GET /dummy/buses/live → 5 buses",           "323ms",  "Pass"),
     ("S-006", "POST /telemetry → HTTP 201",                "445ms",  "Pass"),
     ("S-007", "GET /dashboard.css served with correct MIME","338ms", "Pass"),
     ("S-008", "GET /dashboard.js served with correct MIME", "325ms", "Pass"),

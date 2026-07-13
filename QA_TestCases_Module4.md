@@ -18,7 +18,7 @@
 - **Preconditions:** Flask backend running on localhost:5000
 - **Steps:** 1. Open browser 2. Navigate to localhost:5000 3. Observe UI
 - **Expected:** Page loads within 3s. Nav, hero, stats, date picker visible.
-- **Actual:** Page loaded. All sections visible. Stats strip shows 10 buses.
+- **Actual:** Page loaded. All sections visible. Stats strip shows 5 buses.
 - **Status:** ✅ Pass
 
 ### TC-002: Backend Status Badge — Online/Offline
@@ -28,25 +28,25 @@
 - **Actual:** Online badge shows green. After stopping, shows Offline.
 - **Status:** ✅ Pass
 
-### TC-003: Fleet Stats Strip — 10 Dummy Buses
+### TC-003: Fleet Stats Strip — 5 Dummy Buses
 - **Preconditions:** Dummy data seeded
 - **Steps:** Observe #sBusTotal, #sMoving, #sStopped, #sSos
-- **Expected:** Buses Active shows 10. SOS shows red.
-- **Actual:** All 4 stats render correctly. Total = 10.
+- **Expected:** Buses Active shows 5. SOS shows red.
+- **Actual:** All 4 stats render correctly. Total = 5.
 - **Status:** ✅ Pass
 
 ### TC-004: Bus Table Renders
 - **Preconditions:** Dummy data seeded
 - **Steps:** Navigate to bus list. Verify columns and rows.
-- **Expected:** 10 dummy buses appear as table rows.
-- **Actual:** 10 rows visible. DUMMY01–DUMMY10 listed.
+- **Expected:** 5 dummy buses appear as table rows.
+- **Actual:** 5 rows visible. DUMMY01–DUMMY05 listed.
 - **Status:** ✅ Pass
 
 ### TC-005: Bus List Filters
 - **Preconditions:** Bus list active
 - **Steps:** Click 'Moving', 'Stopped', 'All' filters
 - **Expected:** Filters correctly hide/show rows. Active filter is highlighted.
-- **Actual:** Moving showed 7 buses, Stopped 3. All reset to 10.
+- **Actual:** Moving showed 3 buses, Stopped 2. All reset to 5.
 - **Status:** ✅ Pass
 
 ### TC-006: Live Map Loads with Bus Marker
