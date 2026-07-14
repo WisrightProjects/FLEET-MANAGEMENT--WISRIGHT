@@ -17,3 +17,6 @@ build/
 playwright-report/
 test-results/
 playwright_report.json
+
+# Temporary MS Office files
+~$*
