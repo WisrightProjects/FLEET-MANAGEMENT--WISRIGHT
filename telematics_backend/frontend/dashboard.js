@@ -489,6 +489,10 @@ function showBusList(trip, title) {
   showV('busListView');
 }
 
+function goBusList() {
+  showBusList('all', 'All Live Devices');
+}
+
 function applyFilter(f, btn) {
   selFilter = f;
   document.querySelectorAll('.ftag').forEach(b => b.classList.remove('on'));

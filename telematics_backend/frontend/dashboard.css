@@ -1039,3 +1039,49 @@ tbody td b{color:#fafaf9}
 .ai-ins-skel-line.w-50{width:50%}
 @keyframes ai-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 
+@media (max-width: 600px) {
+  .h-nav {
+    padding: 0 10px;
+    gap: 8px;
+  }
+  .h-logo .org-sub {
+    display: none;
+  }
+  .h-logo .org-name {
+    font-size: 0.85rem;
+  }
+  #homeDate {
+    display: none !important;
+  }
+  .h-clock {
+    padding: 4px 8px;
+    font-size: 0.7rem;
+  }
+  #backendBadge {
+    font-size: 0.6rem !important;
+    margin-left: 4px !important;
+  }
+  .bustest-nav-btn {
+    padding: 4px 8px;
+    font-size: 0.6rem;
+  }
+  .stat-item {
+    padding: 8px 4px;
+  }
+  .stat-num {
+    font-size: 1.3rem;
+  }
+  .stat-lbl {
+    font-size: 0.52rem;
+    letter-spacing: 0.5px;
+  }
+  .hero-search input {
+    padding: 10px 12px;
+    font-size: 0.8rem;
+  }
+  .hero-search button {
+    padding: 10px 14px;
+    font-size: 0.8rem;
+  }
+}
+

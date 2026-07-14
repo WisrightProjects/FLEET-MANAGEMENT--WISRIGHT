@@ -119,7 +119,7 @@ test.describe('📡 Telemetry Ingestion — POST /telemetry', () => {
 
   test('TC-062 | lat=999 (out of range) → HTTP 400', async ({ request }) => {
     const res = await request.post(`${BASE}/telemetry`, {
-      data: validPayload({ lat: 999 }),
+      data: validPayload({ dev_id: DEV + '_LAT_OOR', lat: 999 }),
     });
     expect(res.status()).toBe(400);
     const b = await res.json();
@@ -128,7 +128,7 @@ test.describe('📡 Telemetry Ingestion — POST /telemetry', () => {
 
   test('TC-063 | lon=-999 (out of range) → HTTP 400', async ({ request }) => {
     const res = await request.post(`${BASE}/telemetry`, {
-      data: validPayload({ lon: -999 }),
+      data: validPayload({ dev_id: DEV + '_LON_OOR', lon: -999 }),
     });
     expect(res.status()).toBe(400);
     const b = await res.json();

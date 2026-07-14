@@ -839,8 +839,6 @@ def post_telemetry():
         return jsonify({"status": "error", "message": error}), 400
 
     dev_id = data["dev_id"]
-    if not _check_rate(dev_id):
-        return jsonify({"status": "error", "message": "Rate limit exceeded."}), 429
 
     if data["sos_active"] not in (0, 1):
         return jsonify({"status": "error", "message": "sos_active must be 0 or 1."}), 400
@@ -850,6 +848,9 @@ def post_telemetry():
         return jsonify({"status": "error", "message": "lon must be between -180 and 180."}), 400
     if data["speed_kmh"] < 0:
         return jsonify({"status": "error", "message": "speed_kmh must be >= 0."}), 400
+
+    if not _check_rate(dev_id):
+        return jsonify({"status": "error", "message": "Rate limit exceeded."}), 429
 
     ts = time.time()
     execute(
