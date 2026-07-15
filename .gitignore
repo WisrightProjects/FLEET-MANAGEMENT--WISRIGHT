@@ -6,7 +6,17 @@ __pycache__/
 .env
 *.log
 
+# Arduino / ESP32 build output (generated — the .ino source stays tracked)
+build/
+*.ino.cpp
+*.elf
+*.hex
+*.bin
+.pio/
+
 playwright-report/
 test-results/
 playwright_report.json
 
+# Temporary MS Office files
+~$*

@@ -11,6 +11,8 @@ import mysql.connector
 import time
 import math
 import os
+import json
+import queue
 import threading
 
 import dummy_data
@@ -45,6 +47,13 @@ DB_CONFIG = {
 
 DEVICE_TOKEN  = os.environ.get("DEVICE_TOKEN", "")
 NGROK_TOKEN   = os.environ.get("NGROK_AUTHTOKEN", "")
+
+# How long (s) with no telemetry before a device is considered offline, how
+# close (m) / how long (s) the bus must dwell to count as an auto-detected stop.
+OFFLINE_TIMEOUT_SEC   = float(os.environ.get("OFFLINE_TIMEOUT_SEC",   "45"))
+AUTO_STOP_RADIUS_M    = float(os.environ.get("AUTO_STOP_RADIUS_M",    "60"))
+AUTO_STOP_MIN_SEC     = float(os.environ.get("AUTO_STOP_MIN_SEC",     "120"))
+OFFLINE_POLL_SEC      = float(os.environ.get("OFFLINE_POLL_SEC",      "5"))
 
 # ---------------------------------------------------------------------------
 # Rate limiting — token bucket, 2 req/s per device
@@ -142,6 +151,16 @@ def _get_routes() -> dict:
 _active_at: dict         = {}   # dev_id → geofence state
 _active_trips: dict      = {}   # dev_id → active trip state
 _in_mandatory_stop: dict = {}   # (trip_id, stop_name) → state
+
+# ---------------------------------------------------------------------------
+# Device online/offline state (server-side, timeout-driven) + SSE fanout
+# ---------------------------------------------------------------------------
+
+_device_status: dict      = {}   # dev_id → {"status": "online"/"offline", "last_seen": ts}
+_status_lock              = threading.Lock()
+_status_subscribers: list = []   # list[queue.Queue] — one per open /device/status/stream
+_status_subs_lock         = threading.Lock()
+_watcher_started          = False
 
 # ---------------------------------------------------------------------------
 # ngrok public URL (set at startup if NGROK_AUTHTOKEN is configured)
@@ -317,6 +336,40 @@ def init_db():
         """)
 
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS device_status (
+                dev_id     VARCHAR(64) PRIMARY KEY,
+                status     VARCHAR(10) NOT NULL DEFAULT 'offline',
+                last_seen  DOUBLE,
+                updated_at DOUBLE
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS trip_points (
+                id        INT AUTO_INCREMENT PRIMARY KEY,
+                trip_id   INT    NOT NULL,
+                lat       DOUBLE NOT NULL,
+                lon       DOUBLE NOT NULL,
+                timestamp DOUBLE NOT NULL,
+                INDEX idx_trip (trip_id)
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS auto_stops (
+                id           INT AUTO_INCREMENT PRIMARY KEY,
+                trip_id      INT          NOT NULL,
+                dev_id       VARCHAR(64)  NOT NULL,
+                lat          DOUBLE       NOT NULL,
+                lon          DOUBLE       NOT NULL,
+                start_time   DOUBLE       NOT NULL,
+                end_time     DOUBLE,
+                duration_sec DOUBLE,
+                INDEX idx_trip (trip_id)
+            )
+        """)
+
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS off_route_events (
                 id                  INT AUTO_INCREMENT PRIMARY KEY,
                 dev_id              VARCHAR(64)  NOT NULL,
@@ -345,6 +398,14 @@ def init_db():
                 conn.commit()
             except mysql.connector.Error:
                 pass  # Column already exists — skip
+
+        # Marks a trip as server-auto-created (online→offline lifecycle) vs.
+        # one started via the manual /trip/start endpoint.
+        try:
+            cur.execute("ALTER TABLE trips ADD COLUMN auto TINYINT(1) NOT NULL DEFAULT 0")
+            conn.commit()
+        except mysql.connector.Error:
+            pass  # Column already exists — skip
 
     finally:
         if cur:  cur.close()
@@ -458,10 +519,167 @@ def _end_trip_internal(dev_id: str):
     return st["trip_id"]
 
 
-def _update_trip_tracking(dev_id: str, lat: float, lon: float, ts: float):
+def _accumulate_trip_distance(dev_id: str, lat: float, lon: float):
+    """Adds to the active trip's total_km. Runs for every active trip
+    (manual or auto-detected), independent of whether a route is configured —
+    auto trips have no route_key, so this can't live inside the route-only
+    off-route/mandatory-stop logic in _update_trip_tracking."""
     st = _active_trips.get(dev_id)
     if not st:
         return
+    # Ignore GPS jumps > 500 m (cold-start / NLOS noise)
+    if st["last_lat"] is not None:
+        d_m = haversine_m(st["last_lat"], st["last_lon"], lat, lon)
+        if d_m < 500:
+            st["total_km"] += d_m / 1000.0
+            execute("UPDATE trips SET total_km=%s WHERE id=%s",
+                    (round(st["total_km"], 3), st["trip_id"]))
+    st["last_lat"] = lat
+    st["last_lon"] = lon
+
+
+def _record_trip_point_and_stop(dev_id: str, lat: float, lon: float, ts: float):
+    """Appends a GPS point to trip_points (for the route polyline) and runs
+    dwell-based stop detection: if the bus stays within AUTO_STOP_RADIUS_M of
+    a point for AUTO_STOP_MIN_SEC, that's recorded as a Stop in auto_stops."""
+    st = _active_trips.get(dev_id)
+    if not st:
+        return
+
+    execute("INSERT INTO trip_points (trip_id, lat, lon, timestamp) VALUES (%s,%s,%s,%s)",
+            (st["trip_id"], lat, lon, ts))
+
+    c = st.get("cluster")
+    if c is None:
+        st["cluster"] = {"lat": lat, "lon": lon, "start_ts": ts, "stop_id": None}
+        return
+
+    d = haversine_m(lat, lon, c["lat"], c["lon"])
+    if d <= AUTO_STOP_RADIUS_M:
+        dwell = ts - c["start_ts"]
+        if c["stop_id"] is None and dwell >= AUTO_STOP_MIN_SEC:
+            c["stop_id"] = execute(
+                "INSERT INTO auto_stops (trip_id, dev_id, lat, lon, start_time) VALUES (%s,%s,%s,%s,%s)",
+                (st["trip_id"], dev_id, c["lat"], c["lon"], c["start_ts"]),
+                lastrowid=True,
+            )
+        if c["stop_id"] is not None:
+            execute("UPDATE auto_stops SET end_time=%s, duration_sec=%s WHERE id=%s",
+                    (ts, round(ts - c["start_ts"], 1), c["stop_id"]))
+    else:
+        # Moved away — start a fresh cluster at the new point.
+        st["cluster"] = {"lat": lat, "lon": lon, "start_ts": ts, "stop_id": None}
+
+
+def _auto_start_trip(dev_id: str, ts: float) -> int:
+    """Starts a trip automatically when a device transitions offline→online.
+    Uses the first configured route if one exists (so mandatory-stop/off-route
+    tracking still runs); otherwise starts a route-less "Auto Trip" that still
+    gets distance, GPS trail and dwell-based stop detection."""
+    routes     = _get_routes()
+    route_key  = next(iter(routes)) if routes else None
+    route_name = routes[route_key]["name"] if route_key else "Auto Trip"
+
+    trip_id = execute(
+        "INSERT INTO trips (dev_id, route_name, start_time, status, auto) VALUES (%s,%s,%s,'active',1)",
+        (dev_id, route_name, ts), lastrowid=True,
+    )
+    _active_trips[dev_id] = {
+        "trip_id":            trip_id,
+        "route_key":          route_key,
+        "last_lat":           None,
+        "last_lon":           None,
+        "start_ts":           ts,
+        "total_km":           0.0,
+        "passengers_onboard": 0,
+        "km_at_last_stop":    0.0,
+        "ts_at_last_stop":    ts,
+        "last_off_ts":        0,
+        "cluster":            None,
+    }
+    return trip_id
+
+
+# ---------------------------------------------------------------------------
+# Device online/offline tracking — purely server-side (no firmware changes).
+# A device is "online" as soon as a telemetry packet arrives; if none arrives
+# for OFFLINE_TIMEOUT_SEC it's flipped to "offline" by the background watcher
+# thread below. Each online transition auto-starts a trip (if none is already
+# active); each offline transition auto-ends it — so one ON→OFF session is
+# exactly one trip, matching real ESP32 power-cycle behaviour without needing
+# any change to the firmware.
+# ---------------------------------------------------------------------------
+
+def _broadcast_status(dev_id: str, status: str, ts: float):
+    payload = json.dumps({"dev_id": dev_id, "status": status, "last_seen": ts})
+    with _status_subs_lock:
+        dead = []
+        for q in _status_subscribers:
+            try:
+                q.put_nowait(payload)
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            _status_subscribers.remove(q)
+
+
+def _set_device_status(dev_id: str, status: str, ts: float):
+    with _status_lock:
+        _device_status[dev_id] = {"status": status, "last_seen": ts}
+    execute(
+        "INSERT INTO device_status (dev_id, status, last_seen, updated_at) VALUES (%s,%s,%s,%s) "
+        "ON DUPLICATE KEY UPDATE status=VALUES(status), last_seen=VALUES(last_seen), "
+        "updated_at=VALUES(updated_at)",
+        (dev_id, status, ts, ts),
+    )
+    _broadcast_status(dev_id, status, ts)
+
+
+def _touch_device_online(dev_id: str, ts: float):
+    """Called on every telemetry POST. Flips offline→online (and auto-starts
+    a trip) the first time a packet arrives; otherwise just refreshes last_seen
+    so the offline watcher doesn't time it out."""
+    with _status_lock:
+        prev = _device_status.get(dev_id)
+    if prev is None or prev["status"] != "online":
+        _set_device_status(dev_id, "online", ts)
+        if dev_id not in _active_trips:
+            _auto_start_trip(dev_id, ts)
+    else:
+        with _status_lock:
+            _device_status[dev_id]["last_seen"] = ts
+        execute("UPDATE device_status SET last_seen=%s, updated_at=%s WHERE dev_id=%s", (ts, ts, dev_id))
+
+
+def _offline_watcher():
+    while True:
+        time.sleep(OFFLINE_POLL_SEC)
+        now = time.time()
+        with _status_lock:
+            snapshot = dict(_device_status)
+        for dev_id, info in snapshot.items():
+            if info["status"] == "online" and now - info["last_seen"] > OFFLINE_TIMEOUT_SEC:
+                _set_device_status(dev_id, "offline", info["last_seen"])
+                if dev_id in _active_trips:
+                    _end_trip_internal(dev_id)
+
+
+def start_background_watcher():
+    global _watcher_started
+    if _watcher_started:
+        return
+    _watcher_started = True
+    threading.Thread(target=_offline_watcher, daemon=True).start()
+
+
+def _update_trip_tracking(dev_id: str, lat: float, lon: float, ts: float):
+    """Route-specific tracking only (off-route + mandatory-stop dwell/passenger
+    logic). Distance accumulation and generic stop-detection now live in
+    _accumulate_trip_distance / _record_trip_point_and_stop above, since those
+    must run even for auto-detected trips that have no configured route."""
+    st = _active_trips.get(dev_id)
+    if not st or not st.get("route_key"):
+        return  # No route configured for this trip (e.g. an auto trip) — skip
 
     routes  = _get_routes()
     route   = routes.get(st["route_key"])
@@ -470,17 +688,6 @@ def _update_trip_tracking(dev_id: str, lat: float, lon: float, ts: float):
 
     stop_r  = route["geofence_radius_m"]
     off_thr = route["off_route_threshold_m"]
-
-    # Accumulate distance — ignore GPS jumps > 500 m (cold-start / NLOS noise)
-    if st["last_lat"] is not None:
-        d_m = haversine_m(st["last_lat"], st["last_lon"], lat, lon)
-        if d_m < 500:
-            st["total_km"] += d_m / 1000.0
-            execute("UPDATE trips SET total_km=%s WHERE id=%s",
-                    (round(st["total_km"], 3), st["trip_id"]))
-
-    st["last_lat"] = lat
-    st["last_lon"] = lon
 
     # Off-route detection — throttle to one record per 30 s
     if route["mandatory_stops"]:
@@ -579,9 +786,10 @@ def dashboard_js_route():
     resp.headers["Content-Type"] = "application/javascript; charset=utf-8"
     return resp
 
-@app.route("/qa_test_script.html")
-def qa_test_script_route():
-    return send_from_directory(_FRONTEND_DIR, "qa_test_script.html")
+
+@app.route("/mock")
+def mock_dashboard():
+    return send_from_directory(_FRONTEND_DIR, "mock.html")
 
 
 # ---------------------------------------------------------------------------
@@ -631,8 +839,6 @@ def post_telemetry():
         return jsonify({"status": "error", "message": error}), 400
 
     dev_id = data["dev_id"]
-    if not _check_rate(dev_id):
-        return jsonify({"status": "error", "message": "Rate limit exceeded."}), 429
 
     if data["sos_active"] not in (0, 1):
         return jsonify({"status": "error", "message": "sos_active must be 0 or 1."}), 400
@@ -642,6 +848,9 @@ def post_telemetry():
         return jsonify({"status": "error", "message": "lon must be between -180 and 180."}), 400
     if data["speed_kmh"] < 0:
         return jsonify({"status": "error", "message": "speed_kmh must be >= 0."}), 400
+
+    if not _check_rate(dev_id):
+        return jsonify({"status": "error", "message": "Rate limit exceeded."}), 429
 
     ts = time.time()
     execute(
@@ -657,8 +866,11 @@ def post_telemetry():
             data.get("gps_time"),
         ),
     )
+    _touch_device_online(dev_id, ts)
     run_geofence(dev_id, data["lat"], data["lon"], ts)
+    _accumulate_trip_distance(dev_id, data["lat"], data["lon"])
     _update_trip_tracking(dev_id, data["lat"], data["lon"], ts)
+    _record_trip_point_and_stop(dev_id, data["lat"], data["lon"], ts)
     return jsonify({"status": "ok", "timestamp": ts}), 201
 
 
@@ -885,6 +1097,58 @@ def delete_route(route_key):
 
 
 # ---------------------------------------------------------------------------
+# Device online/offline status — REST + Server-Sent Events for live push
+# ---------------------------------------------------------------------------
+
+@app.route("/device/status", methods=["GET"])
+def device_status_all():
+    with _status_lock:
+        data = [{"dev_id": k, **v} for k, v in _device_status.items()]
+    return jsonify({"status": "ok", "data": data}), 200
+
+
+@app.route("/device/status/<dev_id>", methods=["GET"])
+def device_status_one(dev_id):
+    with _status_lock:
+        info = _device_status.get(dev_id)
+    if info is None:
+        row = query("SELECT status, last_seen FROM device_status WHERE dev_id=%s", (dev_id,), fetch="one")
+        info = row or {"status": "offline", "last_seen": None}
+    return jsonify({"status": "ok", "dev_id": dev_id, "data": info}), 200
+
+
+@app.route("/device/status/stream")
+def device_status_stream():
+    """SSE stream — pushes {dev_id, status, last_seen} the instant a device
+    flips online/offline, so the dashboard updates without polling/refresh."""
+    q = queue.Queue()
+    with _status_subs_lock:
+        _status_subscribers.append(q)
+
+    def gen():
+        try:
+            with _status_lock:
+                snapshot = dict(_device_status)
+            for dev_id, info in snapshot.items():
+                yield f"data: {json.dumps({'dev_id': dev_id, **info})}\n\n"
+            while True:
+                try:
+                    payload = q.get(timeout=15)
+                    yield f"data: {payload}\n\n"
+                except queue.Empty:
+                    yield ": keep-alive\n\n"
+        finally:
+            with _status_subs_lock:
+                if q in _status_subscribers:
+                    _status_subscribers.remove(q)
+
+    resp = app.response_class(gen(), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # Trip endpoints
 # ---------------------------------------------------------------------------
 
@@ -924,6 +1188,7 @@ def start_trip():
         "km_at_last_stop":    0.0,
         "ts_at_last_stop":    ts,
         "last_off_ts":        0,
+        "cluster":            None,
     }
     return jsonify({
         "status":     "ok",
@@ -967,23 +1232,61 @@ def get_trip_summary(trip_id):
     trip = query("SELECT * FROM trips WHERE id=%s", (trip_id,), fetch="one")
     if not trip:
         return jsonify({"status": "error", "message": "Trip not found."}), 404
-    stops     = query("SELECT * FROM trip_stops WHERE trip_id=%s ORDER BY arrived_at ASC", (trip_id,))
-    presence  = query("SELECT * FROM presence_events WHERE trip_id=%s ORDER BY timestamp ASC", (trip_id,))
-    off_route = query("SELECT * FROM off_route_events WHERE trip_id=%s ORDER BY timestamp ASC", (trip_id,))
+    stops       = query("SELECT * FROM trip_stops WHERE trip_id=%s ORDER BY arrived_at ASC", (trip_id,))
+    presence    = query("SELECT * FROM presence_events WHERE trip_id=%s ORDER BY timestamp ASC", (trip_id,))
+    off_route   = query("SELECT * FROM off_route_events WHERE trip_id=%s ORDER BY timestamp ASC", (trip_id,))
+    points      = query("SELECT lat, lon, timestamp FROM trip_points WHERE trip_id=%s ORDER BY timestamp ASC",
+                         (trip_id,))
+    auto_stops  = query("SELECT * FROM auto_stops WHERE trip_id=%s ORDER BY start_time ASC", (trip_id,))
     return jsonify({"status": "ok", "data": {
         "trip": trip, "stops": stops, "presence": presence, "off_route": off_route,
+        "points": points, "auto_stops": auto_stops,
     }}), 200
+
+
+@app.route("/trip/<int:trip_id>/points", methods=["GET"])
+def get_trip_points(trip_id):
+    """Full GPS route (lat, lon, timestamp) for one trip — used to draw the
+    travelled polyline on the Trip History map."""
+    rows = query("SELECT lat, lon, timestamp FROM trip_points WHERE trip_id=%s ORDER BY timestamp ASC",
+                 (trip_id,))
+    return jsonify({"status": "ok", "data": rows}), 200
+
+
+@app.route("/trip/<int:trip_id>/stops", methods=["GET"])
+def get_trip_auto_stops(trip_id):
+    """Dwell-detected stops (bus stayed within AUTO_STOP_RADIUS_M for at
+    least AUTO_STOP_MIN_SEC) for one trip — distinct from the route's
+    mandatory stops in trip_stops."""
+    rows = query("SELECT * FROM auto_stops WHERE trip_id=%s ORDER BY start_time ASC", (trip_id,))
+    return jsonify({"status": "ok", "data": rows}), 200
 
 
 @app.route("/trips", methods=["GET"])
 def list_trips():
     dev_id = request.args.get("dev_id")
+    q_text = request.args.get("q", "").strip()
+    sort   = request.args.get("sort", "start_time")
+    order  = "ASC" if request.args.get("order", "desc").lower() == "asc" else "DESC"
     limit  = min(int(request.args.get("limit", 20)), 100)
+
+    sort_col = {
+        "start_time": "start_time",
+        "duration":   "(IFNULL(end_time, UNIX_TIMESTAMP()) - start_time)",
+        "distance":   "total_km",
+    }.get(sort, "start_time")
+
+    clauses, params = [], []
     if dev_id:
-        rows = query("SELECT * FROM trips WHERE dev_id=%s ORDER BY start_time DESC LIMIT %s",
-                     (dev_id, limit))
-    else:
-        rows = query("SELECT * FROM trips ORDER BY start_time DESC LIMIT %s", (limit,))
+        clauses.append("dev_id=%s"); params.append(dev_id)
+    if q_text:
+        clauses.append("(route_name LIKE %s OR dev_id LIKE %s)")
+        params.extend([f"%{q_text}%", f"%{q_text}%"])
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    sql = f"SELECT * FROM trips {where} ORDER BY {sort_col} {order} LIMIT %s"
+    params.append(limit)
+    rows = query(sql, tuple(params))
     return jsonify({"status": "ok", "data": rows}), 200
 
 
@@ -1119,6 +1422,7 @@ if __name__ == "__main__":
     init_db()
     dummy_data.init_dummy_db(DB_CONFIG)
     dummy_data.seed_if_needed(DB_CONFIG)
+    start_background_watcher()
 
     _ngrok_url = _start_ngrok(5000)
 

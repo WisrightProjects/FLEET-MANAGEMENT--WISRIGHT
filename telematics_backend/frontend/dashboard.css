@@ -82,7 +82,7 @@ button{cursor:pointer;font-family:inherit}
   background:#fff;border-bottom:1px solid #E5E7EB;
 }
 .stat-item{
-  padding:16px 14px;text-align:center;
+  padding:10px 14px;text-align:center;
   border-right:1px solid #E5E7EB;
   display:flex;flex-direction:column;align-items:center;gap:4px;
 }
@@ -108,7 +108,7 @@ button{cursor:pointer;font-family:inherit}
 .date-row button.dr-today{background:#FEE2E2;color:#B91C1C;font-weight:700}
 .date-row button.dr-sel,.date-row button:hover{background:#B91C1C;color:#fff}
 
-.trips-section{padding:24px 16px;background:#F9FAFB}
+.trips-section{padding:14px 16px;background:#F9FAFB}
 .trips-title{
   font-size:.62rem;font-weight:700;text-transform:uppercase;
   letter-spacing:2px;color:#9CA3AF;margin-bottom:16px;
@@ -117,7 +117,7 @@ button{cursor:pointer;font-family:inherit}
 .trips-title::after{content:'';flex:1;height:1px;background:#E5E7EB}
 .trips-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns:repeat(auto-fit, minmax(350px, 1fr));
   gap:16px;
 }
 
@@ -216,11 +216,26 @@ button{cursor:pointer;font-family:inherit}
 .weekend-box p{color:#6B7280;font-size:.88rem}
 
 .rec-footer{
-  background:#111827;color:#6B7280;
-  text-align:center;padding:16px 16px;
+  background:#111827;color:#fff;
+  text-align:center;padding:12px 16px 4px;
   font-size:.72rem;margin-top:16px;
 }
-#busListView .rec-footer{background:#0c0a09;color:#78716c;border-top:1px solid #292524}
+#busListView .rec-footer{background:#0c0a09;color:#fff;border-top:1px solid #292524}
+.credit-line{
+  background:#111827;color:#fff;
+  text-align:center;padding:6px 16px 14px;
+  font-size:.68rem;letter-spacing:.02em;
+}
+#busListView .credit-line{background:#0c0a09;color:#fff;border-top:none}
+.credit-line a{
+  color:#f97316;text-decoration:none;font-weight:600;
+  transition:color .2s;
+}
+.credit-line a:hover{color:#fb923c;text-decoration:underline}
+.highlight-yuvanesh {
+  color:#f97316;
+  font-weight:700;
+}
 
 /* ══════════════════════════════════════════════
    BUS LIST VIEW — warm rose / slate theme
@@ -1027,4 +1042,50 @@ tbody td b{color:#fafaf9}
 .ai-ins-skel-line.w-90{width:90%}
 .ai-ins-skel-line.w-50{width:50%}
 @keyframes ai-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+@media (max-width: 600px) {
+  .h-nav {
+    padding: 0 10px;
+    gap: 8px;
+  }
+  .h-logo .org-sub {
+    display: none;
+  }
+  .h-logo .org-name {
+    font-size: 0.85rem;
+  }
+  #homeDate {
+    display: none !important;
+  }
+  .h-clock {
+    padding: 4px 8px;
+    font-size: 0.7rem;
+  }
+  #backendBadge {
+    font-size: 0.6rem !important;
+    margin-left: 4px !important;
+  }
+  .bustest-nav-btn {
+    padding: 4px 8px;
+    font-size: 0.6rem;
+  }
+  .stat-item {
+    padding: 8px 4px;
+  }
+  .stat-num {
+    font-size: 1.3rem;
+  }
+  .stat-lbl {
+    font-size: 0.52rem;
+    letter-spacing: 0.5px;
+  }
+  .hero-search input {
+    padding: 10px 12px;
+    font-size: 0.8rem;
+  }
+  .hero-search button {
+    padding: 10px 14px;
+    font-size: 0.8rem;
+  }
+}
 

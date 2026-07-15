@@ -96,32 +96,31 @@ BUS_CONFIGS = [
      "waypoints": _wp("Red Hills", "Madhavaram", "Anna Nagar", "College"),
      "base_speed": 35.0, "base_eta": 45, "base_distance": 27.8, "base_departure": "07:35",
      "weights": MIXED_BAG},
-
-    # ── Evening (3pm) — Return routes (mirrored) ──
+    # ── Evening (4pm) — Return trips ──
     {"dev_id": "DUMMY06", "number": "Bus F", "trip": "3pm", "route_name": "College - Koyambedu - Anna Nagar - Mogappair",
      "driver": "R. Selvam", "substitute_driver": "K. Bala",
      "waypoints": _wp("College", "Koyambedu", "Anna Nagar", "Mogappair"),
-     "base_speed": 37.0, "base_eta": 36, "base_distance": 18.4, "base_departure": "15:15",
+     "base_speed": 35.0, "base_eta": 40, "base_distance": 18.4, "base_departure": "16:15",
      "weights": RELIABLE},
     {"dev_id": "DUMMY07", "number": "Bus G", "trip": "3pm", "route_name": "College - Padi - Ambattur - Avadi",
      "driver": "M. Karthik", "substitute_driver": "S. Ravi",
      "waypoints": _wp("College", "Padi", "Ambattur", "Avadi"),
-     "base_speed": 30.0, "base_eta": 50, "base_distance": 26.1, "base_departure": "15:00",
+     "base_speed": 30.0, "base_eta": 55, "base_distance": 26.1, "base_departure": "16:30",
      "weights": BOTTLENECK},
     {"dev_id": "DUMMY08", "number": "Bus H", "trip": "3pm", "route_name": "College - Guindy - Chromepet - Tambaram",
      "driver": "P. Elango", "substitute_driver": "V. Suresh",
      "waypoints": _wp("College", "Guindy", "Chromepet", "Tambaram"),
-     "base_speed": 39.0, "base_eta": 33, "base_distance": 20.7, "base_departure": "15:20",
+     "base_speed": 38.0, "base_eta": 35, "base_distance": 20.7, "base_departure": "16:10",
      "weights": AVERAGE_PLUS_BREAKDOWN},
     {"dev_id": "DUMMY09", "number": "Bus I", "trip": "3pm", "route_name": "College - Koyambedu - Porur - Poonamallee",
      "driver": "A. Ganesan", "substitute_driver": "T. Muthu",
      "waypoints": _wp("College", "Koyambedu", "Porur", "Poonamallee"),
-     "base_speed": 35.0, "base_eta": 41, "base_distance": 22.3, "base_departure": "15:10",
+     "base_speed": 34.0, "base_eta": 45, "base_distance": 22.3, "base_departure": "16:20",
      "weights": WEATHER_SENSITIVE},
     {"dev_id": "DUMMY10", "number": "Bus J", "trip": "3pm", "route_name": "College - Anna Nagar - Madhavaram - Red Hills",
      "driver": "J. Anand", "substitute_driver": "D. Prakash",
      "waypoints": _wp("College", "Anna Nagar", "Madhavaram", "Red Hills"),
-     "base_speed": 34.0, "base_eta": 46, "base_distance": 27.8, "base_departure": "14:55",
+     "base_speed": 32.0, "base_eta": 50, "base_distance": 27.8, "base_departure": "16:25",
      "weights": MIXED_BAG},
 ]
 
@@ -187,9 +186,26 @@ def init_dummy_db(db_config: dict) -> None:
         conn.close()
 
 
+def _purge_removed_buses(conn) -> None:
+    """Deletes any dummy_history/dummy_predictions rows left over from a
+    dev_id no longer in BUS_CONFIGS (e.g. DUMMY06-10, removed when the demo
+    fleet was trimmed from 10 to 5 buses) — otherwise /dummy/history still
+    returns them since it isn't filtered by BUS_CONFIGS."""
+    active_ids = list(BUS_BY_ID.keys())
+    if not active_ids:
+        return
+    cur = conn.cursor()
+    placeholders = ",".join(["%s"] * len(active_ids))
+    cur.execute(f"DELETE FROM dummy_history WHERE dev_id NOT IN ({placeholders})", active_ids)
+    cur.execute(f"DELETE FROM dummy_predictions WHERE dev_id NOT IN ({placeholders})", active_ids)
+    conn.commit()
+    cur.close()
+
+
 def seed_if_needed(db_config: dict) -> None:
     conn = _connect(db_config)
     try:
+        _purge_removed_buses(conn)
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM dummy_history")
         has_history = cur.fetchone()[0] > 0

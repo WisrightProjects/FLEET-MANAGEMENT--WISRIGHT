@@ -24,16 +24,24 @@ Output: a WSGI `app` callable ready for gunicorn, with the schema guaranteed.
 import time
 import mysql.connector
 
-from app import app, init_db  # noqa: F401  (app is imported for gunicorn)
+import dummy_data
+from app import app, init_db, DB_CONFIG, start_background_watcher  # noqa: F401  (app imported for gunicorn)
 
 
 def _init_with_retry(attempts: int = 30, delay: float = 2.0) -> None:
-    """Create schema, retrying while MySQL finishes starting up."""
+    """Create + seed schema, retrying while MySQL finishes starting up."""
     last_err = None
     for i in range(1, attempts + 1):
         try:
             init_db()
-            print(f"[wsgi] Database schema ready (attempt {i}).", flush=True)
+            # Dummy-fleet tables (dummy_history / dummy_predictions) live in the
+            # same DB. app.py only creates/seeds them inside its __main__ block,
+            # which gunicorn never runs — so without this the /dummy/* endpoints
+            # 500 with "Table 'telematics.dummy_history' doesn't exist".
+            # Both calls are idempotent (CREATE TABLE IF NOT EXISTS + seed-if-empty).
+            dummy_data.init_dummy_db(DB_CONFIG)
+            dummy_data.seed_if_needed(DB_CONFIG)
+            print(f"[wsgi] Database schema + dummy data ready (attempt {i}).", flush=True)
             return
         except mysql.connector.Error as e:
             last_err = e
@@ -46,3 +54,4 @@ def _init_with_retry(attempts: int = 30, delay: float = 2.0) -> None:
 
 
 _init_with_retry()
+start_background_watcher()  # online/offline + auto-trip-end polling (app.py has no __main__ under gunicorn)

@@ -503,7 +503,14 @@ bool sim_initialize() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 int buildPayload(char* buf, int bufLen, bool sos) {
+  // ArduinoJson v7 replaced StaticJsonDocument with the elastic JsonDocument
+  // (StaticJsonDocument is deprecated and warns). Guard so this builds warning-
+  // free on v7 while still compiling on v6.
+#if ARDUINOJSON_VERSION_MAJOR >= 7
+  JsonDocument doc;
+#else
   StaticJsonDocument<384> doc;
+#endif
   doc["dev_id"]     = BUS_ID;
   doc["lat"]        = snap.lat;
   doc["lon"]        = snap.lon;

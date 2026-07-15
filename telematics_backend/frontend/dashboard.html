@@ -32,7 +32,6 @@
     </div>
     <div id="backendBadge" style="font-size:.65rem;font-weight:600;color:#fca5a5;white-space:nowrap;margin-left:8px">🔴 Offline</div>
     <button class="bustest-nav-btn" onclick="openBusTest()" title="Open Bus Live Test panel">🚌 Bus Test</button>
-    <button class="bustest-nav-btn" onclick="openQaTest()" title="Open QA Dashboard" style="margin-left: 8px; background: #6366f1; border-color: #4f46e5;">✅ QA Test</button>
   </nav>
 
   <div class="hero">
@@ -53,7 +52,7 @@
   </div>
 
   <div class="date-row" id="dateRow"></div>
-  <div class="hist-picker-row" id="histPickerRow" style="display:flex;align-items:center;gap:8px;padding:0 14px 10px;flex-wrap:wrap">
+  <div class="hist-picker-row" id="histPickerRow" style="display:flex;align-items:center;gap:8px;padding:0 14px 6px;flex-wrap:wrap">
     <span style="font-size:.7rem;color:#8b949e">📅 Previous 15 days:</span>
     <select id="histDateSelect" onchange="onHistDateChange()" style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:.72rem;font-family:'IBM Plex Mono',monospace">
       <option value="">— Select a date —</option>
@@ -63,6 +62,7 @@
   <div id="histSection" style="display:none;padding:0 14px 20px"></div>
 
   <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Helpline: 044-2680-1999 &nbsp;|&nbsp; Mon – Sat · 7 AM – 6 PM</div>
+  <div class="credit-line">Designed &amp; Developed by SRI JANANI, <span class="highlight-yuvanesh">YUVANESH</span>, SUDHARSHAN, VISHALI &nbsp;·&nbsp; Part of the <a href="https://www.wisright.com/" target="_blank" rel="noopener">WisRight Innovation Internship Program</a> (WR-IIP) · June – July 2026</div>
 </div>
 
 
@@ -97,6 +97,7 @@
   </div>
 
   <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Helpline: 044-2680-1999</div>
+  <div class="credit-line">Designed &amp; Developed by SRI JANANI, <span class="highlight-yuvanesh">YUVANESH</span>, SUDHARSHAN, VISHALI &nbsp;·&nbsp; Part of the <a href="https://www.wisright.com/" target="_blank" rel="noopener">WisRight Innovation Internship Program</a> (WR-IIP) · June – July 2026</div>
 </div>
 
 
@@ -110,6 +111,7 @@
       <div class="trk-name" id="trkName">—</div>
       <div class="trk-sub"  id="trkSub">—</div>
     </div>
+    <div id="deviceStatusBadge" style="font-size:.7rem;font-weight:700;padding:4px 10px;border-radius:20px;background:#30363d;color:#8b949e;margin-left:8px;white-space:nowrap">● Unknown</div>
     <div class="live-pill"><span class="pdot"></span> LIVE</div>
     <button id="tripActionBtn" class="trip-start-btn" onclick="tripAction()">▶ Start Trip</button>
     <button class="trips-log-btn" onclick="showTripLog()">📋 Trips</button>
@@ -260,8 +262,19 @@
     </div>
     <button class="trip-refresh-btn" onclick="showTripLog()">🔄 Refresh</button>
   </div>
+  <div style="display:flex;gap:8px;align-items:center;padding:0 14px 10px;flex-wrap:wrap">
+    <input id="tripSearchIn" type="text" placeholder="🔍 Search route or bus…" oninput="showTripLog()"
+           style="flex:1;min-width:180px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:.78rem"/>
+    <select id="tripSortSel" onchange="showTripLog()"
+            style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:.75rem">
+      <option value="start_time">Latest first</option>
+      <option value="duration">Longest duration</option>
+      <option value="distance">Longest distance</option>
+    </select>
+  </div>
   <div id="tripLogContent" style="padding:16px 14px"></div>
   <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Trip Tracking System</div>
+  <div class="credit-line">Designed &amp; Developed by SRI JANANI, <span class="highlight-yuvanesh">YUVANESH</span>, SUDHARSHAN, VISHALI &nbsp;·&nbsp; Part of the <a href="https://www.wisright.com/" target="_blank" rel="noopener">WisRight Innovation Internship Program</a> (WR-IIP) · June – July 2026</div>
 </div>
 
 <!-- ══════════════════════════════════
@@ -281,11 +294,16 @@
       <input id="btBusIdInput" type="text" class="bt-id-input" value="BUS01" placeholder="Bus ID…"/>
       <button class="bt-go-btn" onclick="bustest_start()">Track ▶</button>
     </div>
+    <button class="trips-log-btn" onclick="bustest_showTrips()" title="View trip history for this device" style="margin-left:8px">📋 Trips</button>
     <div class="live-pill" style="margin-left:8px"><span class="pdot"></span> LIVE</div>
   </div>
 
   <!-- Status bar -->
   <div class="bt-status-bar">
+    <!-- Server-side (SSE) truth: mirrors the /device/status/stream state exactly,
+         independent of the freshness heuristic below. Requirement: online/offline
+         must be decided entirely server-side and push instantly, no refresh. -->
+    <span id="btServerStatus" style="font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:#30363d;color:#8b949e;margin-right:8px">● Unknown</span>
     <span id="btStatus" class="bt-status bt-offline">● No signal</span>
     <span id="btLastSeen" class="bt-lastseen">Waiting for device…</span>
     <span id="btSosAlert" class="bt-sos-flash" style="display:none">🚨 SOS ACTIVE</span>
@@ -377,23 +395,8 @@
   </div><!-- /.bt-body -->
 
   <div class="rec-footer">© 2026 Smart Transport Dept. &nbsp;|&nbsp; Bus Live Test — ESP32 + A7670C 4G</div>
+  <div class="credit-line">Designed &amp; Developed by SRI JANANI, <span class="highlight-yuvanesh">YUVANESH</span>, SUDHARSHAN, VISHALI &nbsp;·&nbsp; Part of the <a href="https://www.wisright.com/" target="_blank" rel="noopener">WisRight Innovation Internship Program</a> (WR-IIP) · June – July 2026</div>
 </div><!-- /#busTestView -->
-
-<!-- ══════════════════════════════════
-     VIEW 6 — QA TEST DASHBOARD
-══════════════════════════════════ -->
-<div id="qaTestView" class="view">
-  <div class="bt-topbar">
-    <button class="back-btn" onclick="leaveQaTest()">← Back</button>
-    <div class="bt-title-block">
-      <span class="bt-title">✅ QA Test Dashboard</span>
-      <span class="bt-subtitle">Manual & Automated Test Tracking</span>
-    </div>
-  </div>
-  <div style="width:100%; height:calc(100vh - 60px);">
-    <iframe src="qa_test_script.html" style="width:100%; height:100%; border:none;"></iframe>
-  </div>
-</div>
 
 <script src="dashboard.js" defer></script>
 </body>

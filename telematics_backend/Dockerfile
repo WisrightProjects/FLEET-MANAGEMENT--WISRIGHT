@@ -26,6 +26,11 @@ COPY frontend/ frontend/
 
 EXPOSE 5000
 
+# Run FROM backend/ so `gunicorn_conf.py` and `wsgi:app` resolve even if the
+# platform (Coolify custom start command / Nixpacks) launches gunicorn without
+# an explicit --chdir. Safe because app.py locates ../frontend via __file__,
+# not the current working directory.
+WORKDIR /app/backend
+
 # IMPORTANT: single worker (see gunicorn_conf.py — in-memory trip/geofence state)
-# --chdir puts gunicorn's cwd at backend/ so `wsgi:app` and gunicorn_conf.py resolve.
-CMD ["gunicorn", "--chdir", "backend", "--config", "gunicorn_conf.py", "wsgi:app"]
+CMD ["gunicorn", "--config", "gunicorn_conf.py", "wsgi:app"]
