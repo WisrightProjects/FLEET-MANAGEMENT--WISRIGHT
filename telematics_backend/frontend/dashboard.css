@@ -222,16 +222,20 @@ button{cursor:pointer;font-family:inherit}
 }
 #busListView .rec-footer{background:#0c0a09;color:#78716c;border-top:1px solid #292524}
 .credit-line{
-  background:#111827;color:#4B5563;
+  background:#111827;color:#6B7280;
   text-align:center;padding:6px 16px 14px;
   font-size:.68rem;letter-spacing:.02em;
 }
-#busListView .credit-line{background:#0c0a09;color:#57534e;border-top:none}
+#busListView .credit-line{background:#0c0a09;color:#78716c;border-top:none}
 .credit-line a{
   color:#f97316;text-decoration:none;font-weight:600;
   transition:color .2s;
 }
 .credit-line a:hover{color:#fb923c;text-decoration:underline}
+.highlight-yuvanesh {
+  color:#f97316;
+  font-weight:700;
+}
 
 /* ══════════════════════════════════════════════
    BUS LIST VIEW — warm rose / slate theme
